@@ -1,7 +1,7 @@
-"""Button entities for SH Auto Update Manager.
+"""Button entities for SH Auto Update Manager v1.2.0.
 
-Provides queue control buttons: update all, refresh scan, stop queue,
-skip current, approve all waiting items, and clear queue.
+Per-queue buttons (start, stop, skip) plus global buttons
+(scan all, start all, stop all).
 
 by Smarter Homes LLC — smarter.homes
 """
@@ -15,12 +15,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
-from .queue_manager import UpdateQueueManager
+from .const import DOMAIN, SW_VERSION
+from .queue_manager import QueueCoordinator, NamedQueue
 
 _LOGGER = logging.getLogger(__name__)
-
-SW_VERSION = "1.1.0"
 
 
 async def async_setup_entry(
@@ -29,38 +27,27 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up button entities."""
-    queue_manager: UpdateQueueManager = hass.data[DOMAIN][entry.entry_id][
-        "queue_manager"
+    coordinator: QueueCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+
+    entities: list[ButtonEntity] = [
+        ScanAllButton(entry, coordinator),
+        StartAllButton(entry, coordinator),
+        StopAllButton(entry, coordinator),
     ]
 
-    entities = [
-        UpdateAllEligibleButton(entry, queue_manager),
-        RefreshCandidatesButton(entry, queue_manager),
-        StopQueueButton(entry, queue_manager),
-        SkipCurrentButton(entry, queue_manager),
-        ApproveAllButton(entry, queue_manager),
-        ClearQueueButton(entry, queue_manager),
-    ]
+    for queue in coordinator.queues:
+        entities.append(StartQueueButton(entry, queue, coordinator))
+        entities.append(StopQueueButton(entry, queue, coordinator))
+        entities.append(SkipCurrentButton(entry, queue, coordinator))
 
     async_add_entities(entities)
 
 
-class SHUpdateManagerButtonBase(ButtonEntity):
-    """Base class for SH Update Manager buttons."""
+class _DeviceInfoMixin:
+    """Mixin to provide consistent device info."""
 
-    _attr_has_entity_name = True
-
-    def __init__(
-        self,
-        entry: ConfigEntry,
-        queue_manager: UpdateQueueManager,
-        key: str,
-        name: str,
-    ) -> None:
-        self._queue_manager = queue_manager
-        self._attr_unique_id = f"{entry.entry_id}_{key}"
-        self._attr_name = name
-        self._attr_device_info = {
+    def _make_device_info(self, entry: ConfigEntry) -> dict:
+        return {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "SH Auto Update Manager",
             "manufacturer": "Smarter Homes LLC",
@@ -70,95 +57,119 @@ class SHUpdateManagerButtonBase(ButtonEntity):
         }
 
 
-class UpdateAllEligibleButton(SHUpdateManagerButtonBase):
-    """Button to start updating all eligible entities."""
-
-    _attr_icon = "mdi:update"
-
-    def __init__(
-        self, entry: ConfigEntry, queue_manager: UpdateQueueManager
-    ) -> None:
-        super().__init__(
-            entry, queue_manager, "update_all_eligible", "Update All Eligible"
-        )
-
-    async def async_press(self) -> None:
-        await self._queue_manager.async_install_all_eligible()
+# ---------------------------------------------------------------------------
+# Global buttons
+# ---------------------------------------------------------------------------
 
 
-class RefreshCandidatesButton(SHUpdateManagerButtonBase):
-    """Button to refresh the list of available updates."""
+class ScanAllButton(_DeviceInfoMixin, ButtonEntity):
+    """Button to scan all queues for new updates."""
 
+    _attr_has_entity_name = True
     _attr_icon = "mdi:refresh"
 
-    def __init__(
-        self, entry: ConfigEntry, queue_manager: UpdateQueueManager
-    ) -> None:
-        super().__init__(
-            entry, queue_manager, "refresh_candidates", "Refresh Update Scan"
-        )
+    def __init__(self, entry: ConfigEntry, coordinator: QueueCoordinator) -> None:
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{entry.entry_id}_scan_all"
+        self._attr_name = "Scan All Queues"
+        self._attr_device_info = self._make_device_info(entry)
 
     async def async_press(self) -> None:
-        await self._queue_manager.async_refresh_candidates()
+        await self._coordinator.async_scan_all()
 
 
-class StopQueueButton(SHUpdateManagerButtonBase):
-    """Button to stop the queue."""
+class StartAllButton(_DeviceInfoMixin, ButtonEntity):
+    """Button to start all enabled queues."""
 
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:play-circle"
+
+    def __init__(self, entry: ConfigEntry, coordinator: QueueCoordinator) -> None:
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{entry.entry_id}_start_all"
+        self._attr_name = "Start All Queues"
+        self._attr_device_info = self._make_device_info(entry)
+
+    async def async_press(self) -> None:
+        await self._coordinator.async_start_all()
+
+
+class StopAllButton(_DeviceInfoMixin, ButtonEntity):
+    """Button to stop all running queues."""
+
+    _attr_has_entity_name = True
     _attr_icon = "mdi:stop-circle"
 
-    def __init__(
-        self, entry: ConfigEntry, queue_manager: UpdateQueueManager
-    ) -> None:
-        super().__init__(entry, queue_manager, "stop_queue", "Stop Queue")
+    def __init__(self, entry: ConfigEntry, coordinator: QueueCoordinator) -> None:
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{entry.entry_id}_stop_all"
+        self._attr_name = "Stop All Queues"
+        self._attr_device_info = self._make_device_info(entry)
 
     async def async_press(self) -> None:
-        await self._queue_manager.async_stop_queue()
+        await self._coordinator.async_stop_all()
 
 
-class SkipCurrentButton(SHUpdateManagerButtonBase):
-    """Button to skip the current update."""
+# ---------------------------------------------------------------------------
+# Per-queue buttons
+# ---------------------------------------------------------------------------
 
+
+class StartQueueButton(_DeviceInfoMixin, ButtonEntity):
+    """Button to start a specific queue."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:play"
+
+    def __init__(
+        self, entry: ConfigEntry, queue: NamedQueue, coordinator: QueueCoordinator
+    ) -> None:
+        self._queue = queue
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{entry.entry_id}_{queue.slug}_start"
+        self._attr_name = f"Start {queue.name}"
+        self._attr_device_info = self._make_device_info(entry)
+
+    async def async_press(self) -> None:
+        await self._queue.async_start()
+        await self._coordinator.async_save()
+
+
+class StopQueueButton(_DeviceInfoMixin, ButtonEntity):
+    """Button to stop a specific queue."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:stop"
+
+    def __init__(
+        self, entry: ConfigEntry, queue: NamedQueue, coordinator: QueueCoordinator
+    ) -> None:
+        self._queue = queue
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{entry.entry_id}_{queue.slug}_stop"
+        self._attr_name = f"Stop {queue.name}"
+        self._attr_device_info = self._make_device_info(entry)
+
+    async def async_press(self) -> None:
+        await self._queue.async_stop()
+        await self._coordinator.async_save()
+
+
+class SkipCurrentButton(_DeviceInfoMixin, ButtonEntity):
+    """Button to skip the current item in a queue."""
+
+    _attr_has_entity_name = True
     _attr_icon = "mdi:skip-next"
 
     def __init__(
-        self, entry: ConfigEntry, queue_manager: UpdateQueueManager
+        self, entry: ConfigEntry, queue: NamedQueue, coordinator: QueueCoordinator
     ) -> None:
-        super().__init__(
-            entry, queue_manager, "skip_current", "Skip Current Update"
-        )
+        self._queue = queue
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{entry.entry_id}_{queue.slug}_skip"
+        self._attr_name = f"Skip Current in {queue.name}"
+        self._attr_device_info = self._make_device_info(entry)
 
     async def async_press(self) -> None:
-        await self._queue_manager.async_skip_current()
-
-
-class ApproveAllButton(SHUpdateManagerButtonBase):
-    """Button to approve all items waiting for manual approval."""
-
-    _attr_icon = "mdi:check-all"
-
-    def __init__(
-        self, entry: ConfigEntry, queue_manager: UpdateQueueManager
-    ) -> None:
-        super().__init__(
-            entry, queue_manager, "approve_all", "Approve All Waiting"
-        )
-
-    async def async_press(self) -> None:
-        await self._queue_manager.async_approve_all()
-
-
-class ClearQueueButton(SHUpdateManagerButtonBase):
-    """Button to clear the entire queue and reset counters."""
-
-    _attr_icon = "mdi:delete-sweep"
-
-    def __init__(
-        self, entry: ConfigEntry, queue_manager: UpdateQueueManager
-    ) -> None:
-        super().__init__(
-            entry, queue_manager, "clear_queue", "Clear Queue"
-        )
-
-    async def async_press(self) -> None:
-        await self._queue_manager.async_clear_queue()
+        await self._queue.async_skip_current()
+        await self._coordinator.async_save()

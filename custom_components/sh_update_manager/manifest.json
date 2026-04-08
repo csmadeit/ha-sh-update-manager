@@ -1,12 +1,14 @@
 {
   "domain": "sh_update_manager",
   "name": "SH Auto Update Manager",
-  "codeowners": ["@csmadeit"],
+  "codeowners": [
+    "@csmadeit"
+  ],
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/csmadeit/ha-sh-update-manager",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/csmadeit/ha-sh-update-manager/issues",
   "requirements": [],
-  "version": "1.1.0"
+  "version": "1.2.0"
 }

@@ -4,7 +4,7 @@ by **Smarter Homes LLC** — [smarter.homes](https://smarter.homes)
 
 ## Overview
 
-A HACS custom integration for Home Assistant that manages and automates the installation of all available updates (firmware, software, add-ons) through a grouped queue with per-group execution modes, manual approval workflows, safety overrides, and configurable rules.
+A HACS custom integration for Home Assistant that manages updates through **named queues**. Each queue independently discovers, filters, and installs updates matching its rules — replacing the v1.1 single-global-queue architecture.
 
 ---
 
@@ -16,141 +16,109 @@ A HACS custom integration for Home Assistant that manages and automates the inst
 ┌─────────────────────────────────────────────────┐
 │           Config Flow / Options                  │
 │  (config_flow.py)                                │
-│  Step 1: Global settings                         │
-│  Step 2: Per-group execution modes               │
-│  Step 3: Exclusion filters                       │
+│  Setup: creates entry with default queues        │
+│  Options: list → add/edit/remove queues          │
 └──────────────┬──────────────────────────────────┘
                │
 ┌──────────────▼──────────────────────────────────┐
-│           Queue Manager                          │
-│  (queue_manager.py)                              │
-│  - Discovery: scans entity registry              │
-│  - Classification: maps entities → groups        │
-│  - Filtering: area/label/entity exclusions       │
-│  - Queue: ordered list of QueueItems by group    │
-│  - Executor: per-group sequential/parallel       │
-│  - Safety: Z-Wave + HA Core/OS forced sequential │
-│  - Approval: manual_only workflow                │
-│  - Persistence: Store API for restart safety     │
+│           Queue Coordinator                      │
+│  (queue_manager.py — QueueCoordinator)           │
+│  - Manages all NamedQueue instances              │
+│  - Global operations: scan_all, start_all, stop  │
+│  - Persistence via Store API                     │
+│  - Listener management for global sensors        │
+└──────────────┬──────────────────────────────────┘
+               │ owns N queues
+┌──────────────▼──────────────────────────────────┐
+│           Named Queue                            │
+│  (queue_manager.py — NamedQueue)                 │
+│  - Config: match rule, exec mode, trigger mode   │
+│  - Discovery: matches entities by rule           │
+│  - Processing: sequential or parallel            │
+│  - State machine: idle → running → idle/stopped  │
+│  - Z-Wave battery detection                      │
+│  - Per-queue listeners for sensors               │
 └──────────────┬──────────────────────────────────┘
                │
 ┌──────────────▼──────────────────────────────────┐
 │           Entity Platforms                        │
 │  sensor.py  │  button.py  │  switch.py           │
-│  8 sensors  │  6 buttons  │  2 switches          │
-│  Status + queue list, counts, approval, targets  │
+│  Global overview + per-queue sensors             │
+│  Global + per-queue buttons and switches         │
 └──────────────┬──────────────────────────────────┘
                │
 ┌──────────────▼──────────────────────────────────┐
 │           Services                               │
 │  (services.yaml + __init__.py)                   │
-│  10 service actions for automation/scripting     │
+│  3 global + 6 per-queue service actions          │
 └─────────────────────────────────────────────────┘
 ```
 
 ### Data Flow
 
-1. **Discovery** — Entity registry is scanned for `update.*` entities
-2. **Classification** — Entities are mapped to groups via `INTEGRATION_GROUP_MAP`
-3. **Filtering** — Entities are filtered by group mode (disabled → skip), exclusions, battery status
-4. **Queueing** — Eligible entities are added as `QueueItem` objects, sorted by group execution order
-5. **Approval** — Items in `manual_only` groups are set to `waiting_approval` status
-6. **Execution** — Groups are processed in order:
-   - Sequential: one at a time, wait for each
-   - Parallel: all at once (with safety overrides for Z-Wave, HA Core/OS)
-   - Manual_only: only process approved items
-7. **Persistence** — Queue state saved to `Store` after each change
+1. **Configuration** — User creates/edits queues via options flow, stored in `config_entry.options["queues"]`
+2. **Initialization** — `QueueCoordinator` creates `NamedQueue` instances from config
+3. **Discovery** — Each queue scans entity registry for `update.*` entities matching its rule
+4. **Matching** — Entities matched by integration platform, area, label, or entity ID
+5. **Filtering** — Skip disabled, unavailable, battery (if mains-only), no-update-available
+6. **Queueing** — Matched entities added as `QueueItem` objects with pending status
+7. **Execution** — Sequential (one at a time) or parallel (all at once)
+8. **Persistence** — State saved to Store after each change
 
 ---
 
-## Update Groups
+## Queue Configuration
 
-| Group Key | Display Name | Default Mode | Safety Override |
-|-----------|-------------|-------------|----------------|
-| `zwave` | Z-Wave Firmware | sequential | **Always sequential** |
-| `esphome` | ESPHome Devices | sequential | — |
-| `hacs` | HACS Integrations | disabled | — |
-| `ha_core` | Home Assistant Core | disabled | **Always sequential** |
-| `ha_os` | Home Assistant OS | disabled | **Always sequential** |
-| `addons` | Add-ons | manual_only | — |
-| `matter` | Matter Devices | sequential | — |
-| `mqtt` | MQTT Devices | sequential | — |
-| `other` | Other Updates | manual_only | — |
+### Per-Queue Config Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | string | — | Queue display name (e.g., "Z-Wave Firmware") |
+| `match_type` | enum | `integration` | How to select entities: integration, area, label, entity |
+| `match_value` | string | `""` | Comma-separated values for the match rule |
+| `exec_mode` | enum | `sequential` | How to process: sequential or parallel |
+| `trigger_mode` | enum | `manual` | When to run: manual or auto_on_scan |
+| `zwave_mains_only` | bool | `false` | Skip battery Z-Wave devices |
+| `stop_on_failure` | bool | `false` | Stop queue on first failure |
+| `skip_unavailable` | bool | `true` | Skip unavailable entities |
+| `install_delay` | int | `15` | Seconds between sequential installs (0–300) |
+| `install_timeout` | int | `7200` | Seconds per update timeout (60–14400) |
+| `max_retries` | int | `2` | Retries per failed update (0–10) |
+| `enabled` | bool | `true` | Whether the queue is active |
+
+### Default Queues
+
+| Name | Match Type | Match Value | Exec Mode | Z-Wave Mains Only |
+|------|-----------|-------------|-----------|-------------------|
+| Z-Wave Firmware | integration | zwave_js,zwave | sequential | true |
+| ESPHome Devices | integration | esphome | sequential | false |
+| HACS Updates | integration | hacs | sequential | false |
+| Add-ons | integration | hassio_addons,hassio | sequential | false |
+| Other Updates | integration | matter,mqtt | sequential | false |
+
+HA Core and HA OS are **not** included in any default queue.
 
 ### Integration-to-Group Mapping
 
-| HA Platform | Group |
-|------------|-------|
-| `zwave_js` | zwave |
-| `zwave` | zwave |
+| HA Platform | Group Key |
+|------------|-----------|
+| `zwave_js`, `zwave` | zwave |
 | `esphome` | esphome |
 | `hacs` | hacs |
-| `homeassistant` | ha_core |
+| `homeassistant`, `update` | ha_core |
 | `hassio` | ha_os |
 | `hassio_addons` | addons |
-| `update` | ha_core |
 | `matter` | matter |
 | `mqtt` | mqtt |
 | *(anything else)* | other |
 
-### Group Execution Order
+### Safety Overrides
 
-Device firmware is processed first, system updates last:
+These apply regardless of queue configuration:
 
-1. Z-Wave Firmware
-2. ESPHome Devices
-3. Matter Devices
-4. MQTT Devices
-5. Other Updates
-6. Add-ons
-7. HACS Integrations
-8. Home Assistant Core
-9. Home Assistant OS
-
----
-
-## Configuration Schema
-
-### Initial Setup (Config Flow)
-
-No configuration fields — just click Submit to create the entry. All settings are configured in the Options flow.
-
-### Options Flow — Step 1: Global Settings
-
-| Field | Type | Default | Range | Description |
-|-------|------|---------|-------|-------------|
-| `auto_start` | bool | `false` | — | Auto-start queue on refresh |
-| `zwave_mains_only` | bool | `true` | — | Skip battery Z-Wave devices |
-| `install_delay` | int | `15` | 0–300 | Seconds between installs |
-| `install_timeout` | int | `7200` | 60–14400 | Seconds per update timeout |
-| `max_retries` | int | `2` | 0–10 | Retries per failed update |
-| `stop_on_failure` | bool | `false` | — | Stop queue on first failure |
-| `skip_unavailable` | bool | `true` | — | Skip unavailable entities |
-| `maintenance_window_enabled` | bool | `false` | — | Enable time window |
-| `maintenance_window_start` | string | `02:00` | HH:MM | Window start time |
-| `maintenance_window_end` | string | `05:00` | HH:MM | Window end time |
-
-### Options Flow — Step 2: Per-Group Execution Modes
-
-| Field | Type | Default | Options |
-|-------|------|---------|---------|
-| `mode_zwave` | select | `sequential` | sequential, parallel, disabled, manual_only |
-| `mode_esphome` | select | `sequential` | sequential, parallel, disabled, manual_only |
-| `mode_hacs` | select | `disabled` | sequential, parallel, disabled, manual_only |
-| `mode_ha_core` | select | `disabled` | sequential, parallel, disabled, manual_only |
-| `mode_ha_os` | select | `disabled` | sequential, parallel, disabled, manual_only |
-| `mode_addons` | select | `manual_only` | sequential, parallel, disabled, manual_only |
-| `mode_matter` | select | `sequential` | sequential, parallel, disabled, manual_only |
-| `mode_mqtt` | select | `sequential` | sequential, parallel, disabled, manual_only |
-| `mode_other` | select | `manual_only` | sequential, parallel, disabled, manual_only |
-
-### Options Flow — Step 3: Exclusion Filters
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `exclude_entities` | string | `""` | Comma-separated entity IDs to skip |
-| `exclude_areas` | string | `""` | Comma-separated area IDs to skip |
-| `exclude_labels` | string | `""` | Comma-separated labels to skip |
+1. **Z-Wave** — Always forced to sequential. Z-Wave firmware updates must complete one at a time.
+2. **HA Core** — Always forced to sequential if a queue is created for it.
+3. **HA OS** — Always forced to sequential if a queue is created for it.
 
 ---
 
@@ -159,154 +127,151 @@ No configuration fields — just click Submit to create the entry. All settings 
 ### QueueItem States
 
 ```
-pending ──────────→ installing → completed
-                                → failed (retries exhausted)
-                                → skipped (user skip or unavailable)
-
-waiting_approval → approved → installing → completed / failed / skipped
+pending → installing → completed
+                     → failed (retries exhausted)
+                     → skipped (user skip or unavailable)
 ```
 
 ### Queue States
 
 | State | Description |
 |-------|-------------|
-| `idle` | No queue running, waiting for user action or auto-trigger |
-| `running` | Queue is actively processing updates |
-| `paused` | Queue is paused, will resume on user action |
-| `stopped` | Queue was stopped, requires manual restart |
+| `idle` | Not running, waiting for user action or auto-trigger |
+| `running` | Actively processing updates |
+| `paused` | Paused, will resume on user action |
+| `stopped` | Stopped by user or failure, requires manual restart |
 
-### Discovery Logic
+### Discovery Logic (per queue)
 
 ```python
 for entity in entity_registry:
-    if not entity.startswith("update."):  skip
-    if entity.disabled:                   skip
-    if entity in exclude_entities:        skip
-    if entity.area in exclude_areas:      skip
-    if entity.labels & exclude_labels:    skip
-    if state != "on":                     skip  # no update available
-    if skip_unavailable and state == "unavailable":  skip
+    if not entity.startswith("update."):     skip
+    if entity.disabled:                      skip
+    if state != "on":                        skip  # no update available
+    if skip_unavailable and unavailable:     skip
 
-    group = INTEGRATION_GROUP_MAP.get(entity.platform, "other")
-    mode = get_group_mode(group)
+    if match_type == "integration":
+        if entity.platform not in match_values:  skip
+    elif match_type == "area":
+        if entity.area_id not in match_values:   skip
+    elif match_type == "label":
+        if not entity.labels & match_values:     skip
+    elif match_type == "entity":
+        if entity.entity_id not in match_values: skip
 
-    if mode == "disabled":                skip
-    if group == "zwave" and mains_only:
-        if is_battery_device(entity):     skip
+    if zwave_mains_only and is_battery(entity):  skip
 
-    if mode == "manual_only":
-        item.status = "waiting_approval"
-    else:
-        item.status = "pending"
-
-    add to queue, sorted by GROUP_EXECUTION_ORDER
+    add to queue as pending
 ```
 
 ### Install Logic
 
 ```python
-1. Verify entity state == "on" (update available)
+1. Set item status to "installing"
 2. Call update.install(entity_id=...)
-3. Poll every 10 seconds:
-   - If in_progress: continue waiting
-   - If state != "on": update complete → success
-   - If in_progress is False and state is "on" and elapsed > 60s: stalled → failure
-   - If elapsed > timeout: timeout → failure
-4. On success: mark completed, record last_success
+3. Poll every 5 seconds:
+   - If in_progress is False and state != "on": success
+   - If elapsed > timeout: failure
+4. On success: mark completed, increment completed_count
 5. On failure: increment retries
-   - If retries >= max_retries: mark failed, record last_failure
-   - Else: reset to pending for retry
+   - If retries >= max_retries: mark failed
+   - Else: retry
    - If stop_on_failure: stop queue
+6. Sequential: wait install_delay before next item
 ```
-
-### Safety Overrides
-
-These overrides cannot be disabled and apply even when the user selects "parallel":
-
-1. **Z-Wave** — Always forced to sequential. Z-Wave firmware updates must complete one at a time to avoid Z-Wave mesh contention.
-2. **HA Core** — Always forced to sequential. Core updates restart HA and would interrupt other updates.
-3. **HA OS** — Always forced to sequential. OS updates reboot the machine.
 
 ---
 
 ## Services API
 
-### sh_update_manager.start_queue
-- **Parameters:** none
-- **Effect:** Discovers updates, groups them, starts processing by group in execution order
+### Global Services
 
-### sh_update_manager.pause_queue
+#### sh_update_manager.scan_all
 - **Parameters:** none
-- **Effect:** Pauses after current update finishes
+- **Effect:** Scans all enabled queues for new update entities
 
-### sh_update_manager.resume_queue
+#### sh_update_manager.start_all
 - **Parameters:** none
+- **Effect:** Starts all enabled queues that have pending updates
+
+#### sh_update_manager.stop_all
+- **Parameters:** none
+- **Effect:** Stops all currently running queues
+
+### Per-Queue Services
+
+All per-queue services require a `queue_name` parameter (string, the queue's display name).
+
+#### sh_update_manager.start_queue
+- **Parameters:** `queue_name` (required)
+- **Effect:** Scans and starts processing the named queue
+
+#### sh_update_manager.stop_queue
+- **Parameters:** `queue_name` (required)
+- **Effect:** Stops the named queue
+
+#### sh_update_manager.pause_queue
+- **Parameters:** `queue_name` (required)
+- **Effect:** Pauses the named queue (current update finishes)
+
+#### sh_update_manager.resume_queue
+- **Parameters:** `queue_name` (required)
 - **Effect:** Resumes a paused queue
 
-### sh_update_manager.stop_queue
-- **Parameters:** none
-- **Effect:** Immediately stops queue processing
+#### sh_update_manager.skip_current
+- **Parameters:** `queue_name` (required)
+- **Effect:** Skips the currently installing update in the named queue
 
-### sh_update_manager.skip_current
-- **Parameters:** none
-- **Effect:** Marks current update as skipped, moves to next
-
-### sh_update_manager.refresh_candidates
-- **Parameters:** none
-- **Effect:** Rescans entity registry, classifies entities into groups, updates queue
-
-### sh_update_manager.install_all_eligible
-- **Parameters:** none
-- **Effect:** Same as start_queue (discover + group + install)
-
-### sh_update_manager.install_entity
-- **Parameters:**
-  - `entity_id` (required): Target update entity (e.g., `update.kitchen_light_firmware`)
-- **Effect:** Immediately installs the specified update (bypasses queue)
-
-### sh_update_manager.approve_item
-- **Parameters:**
-  - `entity_id` (required): Target update entity waiting for approval
-- **Effect:** Changes item status from `waiting_approval` to `approved`
-
-### sh_update_manager.clear_queue
-- **Parameters:** none
-- **Effect:** Clears all items from the queue and resets completed/failed counters
+#### sh_update_manager.clear_queue
+- **Parameters:** `queue_name` (required)
+- **Effect:** Clears all items and resets counters for the named queue
 
 ---
 
 ## Entity Specifications
 
-### Sensors (8)
+### Global Sensors (1)
 
-| Entity ID | Name | Unit | Value | Extra Attributes |
-|-----------|------|------|-------|-----------------|
-| `sensor.*_queue_status` | Queue Status | — | idle/running/paused/stopped | total_in_queue, pending, waiting_approval, installing, completed, failed, skipped, queue_items (full list) |
-| `sensor.*_pending_updates` | Pending Updates | updates | int | — |
-| `sensor.*_waiting_approval` | Waiting Approval | updates | int | items (list of waiting entities) |
-| `sensor.*_current_update` | Current Update Target | — | entity_id or None | group, friendly_name, versions, retries |
-| `sensor.*_last_success` | Last Success | — | entity_id or None | — |
-| `sensor.*_last_failure` | Last Failure | — | entity_id or None | — |
-| `sensor.*_completed_count` | Completed Updates | updates | int | — |
-| `sensor.*_failed_count` | Failed Updates | updates | int | — |
+| Entity ID | Name | Value | Extra Attributes |
+|-----------|------|-------|-----------------|
+| `sensor.*_global_overview` | Update Manager Overview | idle/running/paused | total_queues, total_pending, total_completed, total_failed, queues (summary list) |
 
-### Buttons (6)
+### Per-Queue Sensors (3 per queue)
 
-| Entity ID | Name | Effect |
-|-----------|------|--------|
-| `button.*_update_all_eligible` | Update All Eligible | Starts the queue |
-| `button.*_refresh_candidates` | Refresh Update Scan | Rescans updates |
-| `button.*_stop_queue` | Stop Queue | Stops queue |
-| `button.*_skip_current` | Skip Current Update | Skips current |
-| `button.*_approve_all` | Approve All Waiting | Approves all manual-only items |
-| `button.*_clear_queue` | Clear Queue | Clears queue and resets counters |
+| Entity ID | Name | Value | Extra Attributes |
+|-----------|------|-------|-----------------|
+| `sensor.*_{slug}_status` | {Queue} Status | idle/running/paused/stopped | enabled, exec_mode, trigger_mode, pending, completed, failed, last_success, last_failure, current_item |
+| `sensor.*_{slug}_pending` | {Queue} Pending | int (count) | — |
+| `sensor.*_{slug}_items` | {Queue} Items | int (total count) | items (full list with entity_id, friendly_name, status, versions, retries, error) |
 
-### Switches (2)
+### Global Buttons (3)
 
 | Entity ID | Name | Effect |
 |-----------|------|--------|
-| `switch.*_auto_start` | Auto Start Queue | Toggles auto-start mode |
-| `switch.*_pause_queue` | Pause Queue | Toggles pause |
+| `button.*_scan_all` | Scan All Queues | Scan all enabled queues |
+| `button.*_start_all` | Start All Queues | Start all enabled queues |
+| `button.*_stop_all` | Stop All Queues | Stop all running queues |
+
+### Per-Queue Buttons (3 per queue)
+
+| Entity ID | Name | Effect |
+|-----------|------|--------|
+| `button.*_{slug}_start` | Start {Queue} | Start this queue |
+| `button.*_{slug}_stop` | Stop {Queue} | Stop this queue |
+| `button.*_{slug}_skip` | Skip Current in {Queue} | Skip current update |
+
+### Global Switches (1)
+
+| Entity ID | Name | Effect |
+|-----------|------|--------|
+| `switch.*_pause_all` | Pause All Queues | Pause/resume all running queues |
+
+### Per-Queue Switches (2 per queue)
+
+| Entity ID | Name | Effect |
+|-----------|------|--------|
+| `switch.*_{slug}_pause` | Pause {Queue} | Pause/resume this queue |
+| `switch.*_{slug}_enabled` | Enable {Queue} | Enable/disable this queue |
 
 ---
 
@@ -314,58 +279,59 @@ These overrides cannot be disabled and apply even when the user selects "paralle
 
 Queue state is persisted using Home Assistant's `Store` API:
 
-- **Storage key:** `sh_update_manager.queue`
-- **Storage version:** 2
-- **Persisted data:**
+- **Storage key:** `sh_update_manager.queues`
+- **Storage version:** 3
+- **Persisted data per queue:**
   - Queue items (entity_id, group, status, retries, timestamps, friendly_name, versions, error)
   - Queue state (idle/running/paused/stopped)
   - Counters (completed, failed)
   - Last success/failure entity IDs
+  - Queue config
 
-This ensures the queue survives Home Assistant restarts.
+This ensures all queues survive Home Assistant restarts.
 
 ---
 
 ## Future Enhancements
 
-### v1.2 (Planned)
+### v1.3 (Planned)
+- [ ] Scheduled triggers (run queue at specific times, cron-like)
 - [ ] Notification service calls (before/after updates, on failure)
-- [ ] Detailed update history log entity
+- [ ] Detailed update history log entity per queue
 - [ ] Custom Lovelace card for queue visualization
 
 ### v2.0 (Future)
-- [ ] Dashboard panel with drag-and-drop queue ordering
+- [ ] Dashboard sidebar panel with full queue management UI
+- [ ] Drag-and-drop queue ordering
 - [ ] Protocol-specific adapters (Z-Wave wake-up handling)
 - [ ] Backup-before-update integration
 - [ ] Rollback support (where the update platform supports it)
-- [ ] Multi-instance support for different rule sets
 
 ---
 
 ## Version History
 
+### v1.2.0 — 2026-04-08
+- Queue-based architecture — multiple named queues replace single global queue
+- Per-queue configuration: match rules, execution modes, trigger modes
+- Auto-created default queues (Z-Wave, ESPHome, HACS, Add-ons, Other)
+- Per-queue entities (sensors, buttons, switches)
+- Global controls (overview sensor, scan/start/stop buttons, pause-all switch)
+- Queue management UI in options flow
+- HA Core/OS excluded from all default queues
+- 9 services (3 global + 6 per-queue)
+
 ### v1.1.0 — 2026-04-08
 - Per-group execution modes (sequential, parallel, disabled, manual_only)
 - 9 update groups with integration-to-group mapping
 - Z-Wave always-sequential safety override
-- HA Core/OS always-sequential safety override
-- Manual approval workflow for manual_only groups
-- Group execution order (device firmware first, system last)
-- Multi-step options flow (global → per-group → filters)
-- Full queue list in sensor attributes with group info
-- Waiting Approval sensor
-- Approve All and Clear Queue buttons
-- 2 new services: approve_item, clear_queue
-- 8 sensors, 6 buttons, 2 switches
-- 10 services total
+- Manual approval workflow
+- Multi-step options flow
+- 8 sensors, 6 buttons, 2 switches, 10 services
 
 ### v1.0.0 — 2026-04-08
 - Initial release
 - Queue manager with sequential installation
 - Config flow + Options flow
-- 7 sensors, 4 buttons, 2 switches
-- 8 service actions
-- Persistent queue state
-- Maintenance window
-- Integration/area/label/entity filtering
-- Mains-powered-only Z-Wave safety mode
+- 7 sensors, 4 buttons, 2 switches, 8 services
+- Persistent queue state, maintenance window, filtering

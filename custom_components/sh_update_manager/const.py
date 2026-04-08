@@ -1,16 +1,17 @@
-"""Constants for SH Auto Update Manager."""
+"""Constants for SH Auto Update Manager v1.2.0 — Queue-based architecture.
+
+by Smarter Homes LLC — smarter.homes
+"""
 
 DOMAIN = "sh_update_manager"
+SW_VERSION = "1.2.0"
 
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-DEFAULT_SCAN_INTERVAL = 300  # 5 minutes
 DEFAULT_INSTALL_DELAY = 15  # seconds between installs
 DEFAULT_INSTALL_TIMEOUT = 7200  # 2 hours per device
 DEFAULT_MAX_RETRIES = 2
-DEFAULT_MAINTENANCE_WINDOW_START = "02:00"
-DEFAULT_MAINTENANCE_WINDOW_END = "05:00"
 
 # ---------------------------------------------------------------------------
 # Queue states
@@ -21,22 +22,33 @@ QUEUE_STATE_PAUSED = "paused"
 QUEUE_STATE_STOPPED = "stopped"
 
 # ---------------------------------------------------------------------------
-# Execution modes — how updates within a group are processed
+# Execution modes — how updates within a queue are processed
 # ---------------------------------------------------------------------------
-EXEC_MODE_SEQUENTIAL = "sequential"  # one at a time, wait for each to finish
-EXEC_MODE_PARALLEL = "parallel"  # all at once (safe for independent updates)
-EXEC_MODE_DISABLED = "disabled"  # never auto-update, skip entirely
-EXEC_MODE_MANUAL_ONLY = "manual_only"  # show in queue but need explicit approval
+EXEC_MODE_SEQUENTIAL = "sequential"
+EXEC_MODE_PARALLEL = "parallel"
 
-EXEC_MODES_LIST = [
-    EXEC_MODE_SEQUENTIAL,
-    EXEC_MODE_PARALLEL,
-    EXEC_MODE_DISABLED,
-    EXEC_MODE_MANUAL_ONLY,
-]
+EXEC_MODES_LIST = [EXEC_MODE_SEQUENTIAL, EXEC_MODE_PARALLEL]
 
 # ---------------------------------------------------------------------------
-# Update groups — logical groupings by integration type
+# Trigger modes — when a queue runs
+# ---------------------------------------------------------------------------
+TRIGGER_MANUAL = "manual"
+TRIGGER_AUTO = "auto_on_scan"
+
+TRIGGER_MODES_LIST = [TRIGGER_MANUAL, TRIGGER_AUTO]
+
+# ---------------------------------------------------------------------------
+# Match rule types — how a queue selects update entities
+# ---------------------------------------------------------------------------
+MATCH_INTEGRATION = "integration"
+MATCH_AREA = "area"
+MATCH_LABEL = "label"
+MATCH_ENTITY = "entity"
+
+MATCH_TYPES_LIST = [MATCH_INTEGRATION, MATCH_AREA, MATCH_LABEL, MATCH_ENTITY]
+
+# ---------------------------------------------------------------------------
+# Update groups — logical groupings by integration type (for auto-create)
 # ---------------------------------------------------------------------------
 GROUP_ZWAVE = "zwave"
 GROUP_ESPHOME = "esphome"
@@ -48,7 +60,7 @@ GROUP_MATTER = "matter"
 GROUP_MQTT = "mqtt"
 GROUP_OTHER = "other"
 
-# Map HA integration platforms → group
+# Map HA integration platforms -> group key
 INTEGRATION_GROUP_MAP: dict[str, str] = {
     "zwave_js": GROUP_ZWAVE,
     "zwave": GROUP_ZWAVE,
@@ -60,19 +72,6 @@ INTEGRATION_GROUP_MAP: dict[str, str] = {
     "update": GROUP_HA_CORE,
     "matter": GROUP_MATTER,
     "mqtt": GROUP_MQTT,
-}
-
-# Default execution mode per group — conservative
-DEFAULT_GROUP_MODES: dict[str, str] = {
-    GROUP_ZWAVE: EXEC_MODE_SEQUENTIAL,
-    GROUP_ESPHOME: EXEC_MODE_SEQUENTIAL,
-    GROUP_HACS: EXEC_MODE_DISABLED,
-    GROUP_HA_CORE: EXEC_MODE_DISABLED,
-    GROUP_HA_OS: EXEC_MODE_DISABLED,
-    GROUP_ADDONS: EXEC_MODE_MANUAL_ONLY,
-    GROUP_MATTER: EXEC_MODE_SEQUENTIAL,
-    GROUP_MQTT: EXEC_MODE_SEQUENTIAL,
-    GROUP_OTHER: EXEC_MODE_MANUAL_ONLY,
 }
 
 # Human-friendly display names
@@ -88,62 +87,122 @@ GROUP_DISPLAY_NAMES: dict[str, str] = {
     GROUP_OTHER: "Other Updates",
 }
 
-# Processing order — device firmware first, system last
-GROUP_EXECUTION_ORDER: list[str] = [
-    GROUP_ZWAVE,
-    GROUP_ESPHOME,
-    GROUP_MATTER,
-    GROUP_MQTT,
-    GROUP_OTHER,
-    GROUP_ADDONS,
-    GROUP_HACS,
-    GROUP_HA_CORE,
-    GROUP_HA_OS,
+# Which groups MUST be sequential (safety override)
+FORCE_SEQUENTIAL_GROUPS = {GROUP_ZWAVE, GROUP_HA_CORE, GROUP_HA_OS}
+
+# Default auto-created queues
+DEFAULT_QUEUES: list[dict] = [
+    {
+        "name": "Z-Wave Firmware",
+        "match_type": MATCH_INTEGRATION,
+        "match_value": "zwave_js,zwave",
+        "exec_mode": EXEC_MODE_SEQUENTIAL,
+        "trigger_mode": TRIGGER_MANUAL,
+        "zwave_mains_only": True,
+        "stop_on_failure": False,
+        "skip_unavailable": True,
+        "install_delay": DEFAULT_INSTALL_DELAY,
+        "install_timeout": DEFAULT_INSTALL_TIMEOUT,
+        "max_retries": DEFAULT_MAX_RETRIES,
+        "enabled": True,
+    },
+    {
+        "name": "ESPHome Devices",
+        "match_type": MATCH_INTEGRATION,
+        "match_value": "esphome",
+        "exec_mode": EXEC_MODE_SEQUENTIAL,
+        "trigger_mode": TRIGGER_MANUAL,
+        "zwave_mains_only": False,
+        "stop_on_failure": False,
+        "skip_unavailable": True,
+        "install_delay": DEFAULT_INSTALL_DELAY,
+        "install_timeout": DEFAULT_INSTALL_TIMEOUT,
+        "max_retries": DEFAULT_MAX_RETRIES,
+        "enabled": True,
+    },
+    {
+        "name": "HACS Updates",
+        "match_type": MATCH_INTEGRATION,
+        "match_value": "hacs",
+        "exec_mode": EXEC_MODE_SEQUENTIAL,
+        "trigger_mode": TRIGGER_MANUAL,
+        "zwave_mains_only": False,
+        "stop_on_failure": False,
+        "skip_unavailable": True,
+        "install_delay": DEFAULT_INSTALL_DELAY,
+        "install_timeout": DEFAULT_INSTALL_TIMEOUT,
+        "max_retries": DEFAULT_MAX_RETRIES,
+        "enabled": True,
+    },
+    {
+        "name": "Add-ons",
+        "match_type": MATCH_INTEGRATION,
+        "match_value": "hassio_addons,hassio",
+        "exec_mode": EXEC_MODE_SEQUENTIAL,
+        "trigger_mode": TRIGGER_MANUAL,
+        "zwave_mains_only": False,
+        "stop_on_failure": False,
+        "skip_unavailable": True,
+        "install_delay": DEFAULT_INSTALL_DELAY,
+        "install_timeout": DEFAULT_INSTALL_TIMEOUT,
+        "max_retries": DEFAULT_MAX_RETRIES,
+        "enabled": True,
+    },
+    {
+        "name": "Other Updates",
+        "match_type": MATCH_INTEGRATION,
+        "match_value": "matter,mqtt",
+        "exec_mode": EXEC_MODE_SEQUENTIAL,
+        "trigger_mode": TRIGGER_MANUAL,
+        "zwave_mains_only": False,
+        "stop_on_failure": False,
+        "skip_unavailable": True,
+        "install_delay": DEFAULT_INSTALL_DELAY,
+        "install_timeout": DEFAULT_INSTALL_TIMEOUT,
+        "max_retries": DEFAULT_MAX_RETRIES,
+        "enabled": True,
+    },
 ]
 
 # ---------------------------------------------------------------------------
 # Queue-item statuses
 # ---------------------------------------------------------------------------
 ITEM_STATUS_PENDING = "pending"
-ITEM_STATUS_APPROVED = "approved"
 ITEM_STATUS_INSTALLING = "installing"
 ITEM_STATUS_COMPLETED = "completed"
 ITEM_STATUS_FAILED = "failed"
 ITEM_STATUS_SKIPPED = "skipped"
-ITEM_STATUS_WAITING_APPROVAL = "waiting_approval"
 
 # ---------------------------------------------------------------------------
-# Config keys — global settings
+# Config keys
 # ---------------------------------------------------------------------------
-CONF_EXCLUDE_ENTITIES = "exclude_entities"
-CONF_EXCLUDE_AREAS = "exclude_areas"
-CONF_EXCLUDE_LABELS = "exclude_labels"
-CONF_AUTO_START = "auto_start"
+CONF_QUEUES = "queues"
+
+# Per-queue config keys
+CONF_QUEUE_NAME = "name"
+CONF_MATCH_TYPE = "match_type"
+CONF_MATCH_VALUE = "match_value"
+CONF_EXEC_MODE = "exec_mode"
+CONF_TRIGGER_MODE = "trigger_mode"
+CONF_ZWAVE_MAINS_ONLY = "zwave_mains_only"
+CONF_STOP_ON_FAILURE = "stop_on_failure"
+CONF_SKIP_UNAVAILABLE = "skip_unavailable"
 CONF_INSTALL_DELAY = "install_delay"
 CONF_INSTALL_TIMEOUT = "install_timeout"
 CONF_MAX_RETRIES = "max_retries"
-CONF_MAINTENANCE_WINDOW_ENABLED = "maintenance_window_enabled"
-CONF_MAINTENANCE_WINDOW_START = "maintenance_window_start"
-CONF_MAINTENANCE_WINDOW_END = "maintenance_window_end"
-CONF_STOP_ON_FAILURE = "stop_on_failure"
-CONF_SKIP_UNAVAILABLE = "skip_unavailable"
-
-# Per-group config keys (stored as JSON dicts in options)
-CONF_GROUP_MODES = "group_modes"
-CONF_ZWAVE_MAINS_ONLY = "zwave_mains_only"
+CONF_QUEUE_ENABLED = "enabled"
 
 # ---------------------------------------------------------------------------
 # Services
 # ---------------------------------------------------------------------------
+SERVICE_SCAN_ALL = "scan_all"
+SERVICE_START_ALL = "start_all"
+SERVICE_STOP_ALL = "stop_all"
 SERVICE_START_QUEUE = "start_queue"
+SERVICE_STOP_QUEUE = "stop_queue"
 SERVICE_PAUSE_QUEUE = "pause_queue"
 SERVICE_RESUME_QUEUE = "resume_queue"
-SERVICE_STOP_QUEUE = "stop_queue"
 SERVICE_SKIP_CURRENT = "skip_current"
-SERVICE_REFRESH_CANDIDATES = "refresh_candidates"
-SERVICE_INSTALL_ALL_ELIGIBLE = "install_all_eligible"
-SERVICE_INSTALL_ENTITY = "install_entity"
-SERVICE_APPROVE_ITEM = "approve_item"
 SERVICE_CLEAR_QUEUE = "clear_queue"
 
 # ---------------------------------------------------------------------------
@@ -154,5 +213,5 @@ PLATFORMS = ["sensor", "button", "switch"]
 # ---------------------------------------------------------------------------
 # Storage
 # ---------------------------------------------------------------------------
-STORAGE_KEY = f"{DOMAIN}.queue"
-STORAGE_VERSION = 2
+STORAGE_KEY = f"{DOMAIN}.queues"
+STORAGE_VERSION = 3

@@ -1,68 +1,82 @@
+scan_all:
+  name: Scan All Queues
+  description: >-
+    Scan all enabled queues for new update entities matching their rules.
+
+start_all:
+  name: Start All Queues
+  description: >-
+    Start processing all enabled queues that have pending updates.
+
+stop_all:
+  name: Stop All Queues
+  description: >-
+    Stop all currently running queues.
+
 start_queue:
   name: Start Queue
-  description: >-
-    Start processing the update queue. Discovers eligible updates, groups them
-    by integration type, and installs them according to per-group execution
-    modes (sequential, parallel, or manual-only).
+  description: Start processing a specific named queue.
+  fields:
+    queue_name:
+      name: Queue Name
+      description: The name of the queue to start (e.g., "Z-Wave Firmware").
+      required: true
+      selector:
+        text:
+
+stop_queue:
+  name: Stop Queue
+  description: Stop a specific named queue.
+  fields:
+    queue_name:
+      name: Queue Name
+      description: The name of the queue to stop.
+      required: true
+      selector:
+        text:
 
 pause_queue:
   name: Pause Queue
   description: >-
-    Pause the update queue. The current update will finish but no new updates
-    will start until resumed.
+    Pause a specific queue. Current update finishes but no new updates start.
+  fields:
+    queue_name:
+      name: Queue Name
+      description: The name of the queue to pause.
+      required: true
+      selector:
+        text:
 
 resume_queue:
   name: Resume Queue
-  description: Resume a paused update queue.
-
-stop_queue:
-  name: Stop Queue
-  description: Stop the update queue immediately and cancel processing.
+  description: Resume a paused queue.
+  fields:
+    queue_name:
+      name: Queue Name
+      description: The name of the queue to resume.
+      required: true
+      selector:
+        text:
 
 skip_current:
   name: Skip Current
-  description: Skip the currently installing update and move to the next one.
-
-refresh_candidates:
-  name: Refresh Candidates
-  description: >-
-    Rescan all update entities, classify them into groups, and refresh the
-    queue with newly available updates.
-
-install_all_eligible:
-  name: Install All Eligible
-  description: >-
-    Discover all eligible updates and start installing them according to
-    per-group execution modes.
-
-install_entity:
-  name: Install Entity
-  description: Install a specific update entity immediately (bypasses queue).
+  description: Skip the currently installing update in a queue.
   fields:
-    entity_id:
-      name: Entity ID
-      description: The update entity to install (e.g., update.kitchen_light_firmware).
+    queue_name:
+      name: Queue Name
+      description: The name of the queue to skip the current item in.
       required: true
       selector:
-        entity:
-          domain: update
-
-approve_item:
-  name: Approve Item
-  description: >-
-    Approve a manual-only update item so it will be installed when the queue
-    runs. Items in manual_only groups require explicit approval before
-    installation.
-  fields:
-    entity_id:
-      name: Entity ID
-      description: The update entity to approve for installation.
-      required: true
-      selector:
-        entity:
-          domain: update
+        text:
 
 clear_queue:
   name: Clear Queue
   description: >-
-    Clear all items from the queue and reset completed/failed counters.
+    Clear all items from a specific queue and reset its counters.
+  fields:
+    queue_name:
+      name: Queue Name
+      description: The name of the queue to clear.
+      required: true
+      selector:
+        text:

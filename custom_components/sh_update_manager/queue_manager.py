@@ -1,7 +1,7 @@
-"""Queue manager for SH Auto Update Manager.
+"""Queue manager for SH Auto Update Manager v1.2.0.
 
-Handles discovery, grouping, filtering, and sequential/parallel installation
-of Home Assistant update entities with per-group execution modes.
+Each named queue independently discovers, filters, and installs updates
+matching its rules. Queues run independently of each other.
 
 by Smarter Homes LLC — smarter.homes
 """
@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, time
+import re
+from datetime import datetime
 from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
@@ -26,35 +27,29 @@ from .const import (
     QUEUE_STATE_STOPPED,
     EXEC_MODE_SEQUENTIAL,
     EXEC_MODE_PARALLEL,
-    EXEC_MODE_DISABLED,
-    EXEC_MODE_MANUAL_ONLY,
     ITEM_STATUS_PENDING,
-    ITEM_STATUS_APPROVED,
     ITEM_STATUS_INSTALLING,
     ITEM_STATUS_COMPLETED,
     ITEM_STATUS_FAILED,
     ITEM_STATUS_SKIPPED,
-    ITEM_STATUS_WAITING_APPROVAL,
+    MATCH_INTEGRATION,
+    MATCH_AREA,
+    MATCH_LABEL,
+    MATCH_ENTITY,
     INTEGRATION_GROUP_MAP,
-    DEFAULT_GROUP_MODES,
-    GROUP_DISPLAY_NAMES,
-    GROUP_EXECUTION_ORDER,
+    FORCE_SEQUENTIAL_GROUPS,
     GROUP_ZWAVE,
-    GROUP_HA_CORE,
-    GROUP_HA_OS,
-    CONF_EXCLUDE_ENTITIES,
-    CONF_EXCLUDE_AREAS,
-    CONF_EXCLUDE_LABELS,
-    CONF_GROUP_MODES,
+    CONF_MATCH_TYPE,
+    CONF_MATCH_VALUE,
+    CONF_EXEC_MODE,
+    CONF_TRIGGER_MODE,
     CONF_ZWAVE_MAINS_ONLY,
+    CONF_STOP_ON_FAILURE,
+    CONF_SKIP_UNAVAILABLE,
     CONF_INSTALL_DELAY,
     CONF_INSTALL_TIMEOUT,
     CONF_MAX_RETRIES,
-    CONF_MAINTENANCE_WINDOW_ENABLED,
-    CONF_MAINTENANCE_WINDOW_START,
-    CONF_MAINTENANCE_WINDOW_END,
-    CONF_STOP_ON_FAILURE,
-    CONF_SKIP_UNAVAILABLE,
+    CONF_QUEUE_ENABLED,
     DEFAULT_INSTALL_DELAY,
     DEFAULT_INSTALL_TIMEOUT,
     DEFAULT_MAX_RETRIES,
@@ -66,7 +61,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class QueueItem:
-    """Represents a single update in the queue."""
+    """Represents a single update in a queue."""
 
     def __init__(self, entity_id: str, group: str = "other") -> None:
         self.entity_id = entity_id
@@ -112,382 +107,255 @@ class QueueItem:
         return item
 
 
-class UpdateQueueManager:
-    """Manages the update queue with per-group execution modes.
+def _slugify(name: str) -> str:
+    """Convert a queue name to a slug for entity IDs."""
+    slug = name.lower().strip()
+    slug = re.sub(r"[^a-z0-9]+", "_", slug)
+    slug = slug.strip("_")
+    return slug or "queue"
 
-    Key features:
-    - Per-group execution modes: sequential, parallel, disabled, manual_only
-    - Z-Wave is ALWAYS forced sequential (safety override, never parallel)
-    - HA Core/OS is ALWAYS forced sequential (safety override)
-    - Manual approval workflow for manual_only groups
-    - Group-by-group processing in defined execution order
-    - Battery device detection for Z-Wave mains-only filtering
-    - Persistence via HA Store API
-    """
 
-    def __init__(self, hass: HomeAssistant, options: dict[str, Any]) -> None:
+class NamedQueue:
+    """A single named update queue with independent config and state."""
+
+    def __init__(self, hass: HomeAssistant, queue_config: dict[str, Any]) -> None:
         self.hass = hass
-        self.options = options
-        self._queue: list[QueueItem] = []
+        self.config = dict(queue_config)
+        self.name: str = queue_config.get("name", "Unnamed Queue")
+        self.slug = _slugify(self.name)
+        self._items: list[QueueItem] = []
         self._state = QUEUE_STATE_IDLE
         self._current_item: QueueItem | None = None
         self._task: asyncio.Task | None = None
-        self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self._last_success: str | None = None
         self._last_failure: str | None = None
         self._completed_count = 0
         self._failed_count = 0
         self._listeners: list[Any] = []
 
-    # ------------------------------------------------------------------
-    # Properties
-    # ------------------------------------------------------------------
+    @property
+    def enabled(self) -> bool:
+        return self.config.get(CONF_QUEUE_ENABLED, True)
+
+    @property
+    def match_type(self) -> str:
+        return self.config.get(CONF_MATCH_TYPE, MATCH_INTEGRATION)
+
+    @property
+    def match_value(self) -> str:
+        return self.config.get(CONF_MATCH_VALUE, "")
+
+    @property
+    def exec_mode(self) -> str:
+        mode = self.config.get(CONF_EXEC_MODE, EXEC_MODE_SEQUENTIAL)
+        match_vals = {v.strip() for v in self.match_value.split(",")}
+        for val in match_vals:
+            group = INTEGRATION_GROUP_MAP.get(val, val)
+            if group in FORCE_SEQUENTIAL_GROUPS:
+                return EXEC_MODE_SEQUENTIAL
+        return mode
+
+    @property
+    def trigger_mode(self) -> str:
+        return self.config.get(CONF_TRIGGER_MODE, "manual")
+
+    @property
+    def zwave_mains_only(self) -> bool:
+        return self.config.get(CONF_ZWAVE_MAINS_ONLY, False)
+
+    @property
+    def stop_on_failure(self) -> bool:
+        return self.config.get(CONF_STOP_ON_FAILURE, False)
+
+    @property
+    def skip_unavailable(self) -> bool:
+        return self.config.get(CONF_SKIP_UNAVAILABLE, True)
+
+    @property
+    def install_delay(self) -> int:
+        return self.config.get(CONF_INSTALL_DELAY, DEFAULT_INSTALL_DELAY)
+
+    @property
+    def install_timeout(self) -> int:
+        return self.config.get(CONF_INSTALL_TIMEOUT, DEFAULT_INSTALL_TIMEOUT)
+
+    @property
+    def max_retries(self) -> int:
+        return self.config.get(CONF_MAX_RETRIES, DEFAULT_MAX_RETRIES)
 
     @property
     def state(self) -> str:
-        """Return the current queue state."""
         return self._state
 
     @property
     def current_item(self) -> QueueItem | None:
-        """Return the currently installing item."""
         return self._current_item
 
     @property
-    def queue(self) -> list[QueueItem]:
-        """Return a copy of the current queue."""
-        return list(self._queue)
+    def items(self) -> list[QueueItem]:
+        return list(self._items)
 
     @property
     def pending_count(self) -> int:
-        """Return the number of pending + approved updates."""
-        return len(
-            [i for i in self._queue if i.status in (ITEM_STATUS_PENDING, ITEM_STATUS_APPROVED)]
-        )
-
-    @property
-    def waiting_approval_count(self) -> int:
-        """Return the number of items waiting for manual approval."""
-        return len([i for i in self._queue if i.status == ITEM_STATUS_WAITING_APPROVAL])
+        return len([i for i in self._items if i.status == ITEM_STATUS_PENDING])
 
     @property
     def completed_count(self) -> int:
-        """Return the number of completed updates this session."""
         return self._completed_count
 
     @property
     def failed_count(self) -> int:
-        """Return the number of failed updates this session."""
         return self._failed_count
 
     @property
     def last_success(self) -> str | None:
-        """Return the last successfully updated entity."""
         return self._last_success
 
     @property
     def last_failure(self) -> str | None:
-        """Return the last failed entity."""
         return self._last_failure
 
     @property
-    def queue_summary(self) -> list[dict[str, Any]]:
-        """Return a lightweight summary of every queue item for sensor attrs."""
+    def items_summary(self) -> list[dict[str, Any]]:
         return [
             {
                 "entity_id": i.entity_id,
-                "group": i.group,
-                "group_name": GROUP_DISPLAY_NAMES.get(i.group, i.group),
-                "status": i.status,
                 "friendly_name": i.friendly_name,
+                "status": i.status,
                 "installed_version": i.installed_version,
                 "latest_version": i.latest_version,
                 "retries": i.retries,
                 "error": i.error,
             }
-            for i in self._queue
+            for i in self._items
         ]
 
-    # ------------------------------------------------------------------
-    # Listener management
-    # ------------------------------------------------------------------
-
     def register_listener(self, listener: Any) -> None:
-        """Register a state change listener."""
         self._listeners.append(listener)
 
     def remove_listener(self, listener: Any) -> None:
-        """Remove a state change listener."""
         if listener in self._listeners:
             self._listeners.remove(listener)
 
     @callback
-    def _notify_listeners(self) -> None:
-        """Notify all listeners of state change."""
-        for listener in self._listeners:
-            listener()
+    def _notify(self) -> None:
+        for ln in self._listeners:
+            ln()
 
-    # ------------------------------------------------------------------
-    # Persistence
-    # ------------------------------------------------------------------
-
-    async def async_load(self) -> None:
-        """Load persisted queue state."""
-        data = await self._store.async_load()
-        if data and "queue" in data:
-            self._queue = [QueueItem.from_dict(item) for item in data["queue"]]
-            self._state = data.get("state", QUEUE_STATE_IDLE)
-            self._last_success = data.get("last_success")
-            self._last_failure = data.get("last_failure")
-            self._completed_count = data.get("completed_count", 0)
-            self._failed_count = data.get("failed_count", 0)
-            _LOGGER.info(
-                "Loaded persisted queue: %d items, state=%s",
-                len(self._queue),
-                self._state,
-            )
-
-    async def async_save(self) -> None:
-        """Persist queue state."""
-        data = {
-            "queue": [item.to_dict() for item in self._queue],
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "config": self.config,
+            "items": [i.to_dict() for i in self._items],
             "state": self._state,
             "last_success": self._last_success,
             "last_failure": self._last_failure,
             "completed_count": self._completed_count,
             "failed_count": self._failed_count,
         }
-        await self._store.async_save(data)
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
+    def load_state(self, data: dict[str, Any]) -> None:
+        self._items = [QueueItem.from_dict(d) for d in data.get("items", [])]
+        self._state = data.get("state", QUEUE_STATE_IDLE)
+        self._last_success = data.get("last_success")
+        self._last_failure = data.get("last_failure")
+        self._completed_count = data.get("completed_count", 0)
+        self._failed_count = data.get("failed_count", 0)
 
-    def _get_group_mode(self, group: str) -> str:
-        """Return the execution mode for a group, respecting user overrides."""
-        modes = self.options.get(CONF_GROUP_MODES, {})
-        return modes.get(group, DEFAULT_GROUP_MODES.get(group, EXEC_MODE_MANUAL_ONLY))
-
-    def _classify_entity(self, platform: str) -> str:
-        """Map an HA integration platform string to our group name."""
-        return INTEGRATION_GROUP_MAP.get(platform, "other")
-
-    def _is_in_maintenance_window(self) -> bool:
-        """Check if current time is within the maintenance window."""
-        if not self.options.get(CONF_MAINTENANCE_WINDOW_ENABLED, False):
-            return True  # No window restriction
-        now = datetime.now().time()
-        start = time.fromisoformat(
-            self.options.get(CONF_MAINTENANCE_WINDOW_START, "02:00")
-        )
-        end = time.fromisoformat(
-            self.options.get(CONF_MAINTENANCE_WINDOW_END, "05:00")
-        )
-        if start <= end:
-            return start <= now <= end
-        # Crosses midnight
-        return now >= start or now <= end
+    def _entity_matches(self, entity_entry: er.RegistryEntry) -> bool:
+        if self.match_type == MATCH_INTEGRATION:
+            targets = {v.strip() for v in self.match_value.split(",") if v.strip()}
+            return entity_entry.platform in targets
+        if self.match_type == MATCH_AREA:
+            targets = {v.strip() for v in self.match_value.split(",") if v.strip()}
+            return entity_entry.area_id in targets if entity_entry.area_id else False
+        if self.match_type == MATCH_LABEL:
+            targets = {v.strip() for v in self.match_value.split(",") if v.strip()}
+            if hasattr(entity_entry, "labels") and entity_entry.labels:
+                return bool(entity_entry.labels.intersection(targets))
+            return False
+        if self.match_type == MATCH_ENTITY:
+            targets = {v.strip() for v in self.match_value.split(",") if v.strip()}
+            return entity_entry.entity_id in targets
+        return False
 
     def _is_battery_device(self, entity_entry: er.RegistryEntry) -> bool:
-        """Best-effort check if a device is battery-powered (Z-Wave)."""
         try:
             from homeassistant.helpers import device_registry as dr
-
             dev_reg = dr.async_get(self.hass)
             if entity_entry.device_id:
                 device = dev_reg.async_get(entity_entry.device_id)
                 if device:
                     ent_reg = er.async_get(self.hass)
                     for ent in er.async_entries_for_device(ent_reg, device.id):
-                        if (
-                            ent.entity_id.startswith("sensor.")
-                            and "battery" in ent.entity_id
-                        ):
+                        if ent.entity_id.startswith("sensor.") and "battery" in ent.entity_id:
                             return True
                         st = self.hass.states.get(ent.entity_id)
                         if st and st.attributes.get("device_class") == "battery":
                             return True
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         return False
 
-    # ------------------------------------------------------------------
-    # Discovery
-    # ------------------------------------------------------------------
-
-    async def async_discover_updates(self) -> list[QueueItem]:
-        """Discover all update entities with available updates and classify."""
+    async def async_scan(self) -> int:
+        if not self.enabled:
+            return 0
         ent_reg = er.async_get(self.hass)
-
-        exclude_entities = set(self.options.get(CONF_EXCLUDE_ENTITIES, []))
-        exclude_areas = set(self.options.get(CONF_EXCLUDE_AREAS, []))
-        exclude_labels = set(self.options.get(CONF_EXCLUDE_LABELS, []))
-        zwave_mains_only = self.options.get(CONF_ZWAVE_MAINS_ONLY, True)
-
         candidates: list[QueueItem] = []
-
         for entity_entry in ent_reg.entities.values():
             if not entity_entry.entity_id.startswith("update."):
                 continue
             if entity_entry.disabled:
                 continue
-            if entity_entry.entity_id in exclude_entities:
+            if not self._entity_matches(entity_entry):
                 continue
-            if exclude_areas and entity_entry.area_id in exclude_areas:
-                continue
-            if exclude_labels and hasattr(entity_entry, "labels"):
-                if entity_entry.labels and entity_entry.labels.intersection(
-                    exclude_labels
-                ):
-                    continue
-
             state = self.hass.states.get(entity_entry.entity_id)
             if state is None or state.state != STATE_ON:
                 continue
-
-            if self.options.get(CONF_SKIP_UNAVAILABLE, True):
-                if state.state == "unavailable":
-                    continue
-
-            group = self._classify_entity(entity_entry.platform)
-            mode = self._get_group_mode(group)
-
-            # Disabled groups are completely skipped
-            if mode == EXEC_MODE_DISABLED:
+            if self.skip_unavailable and state.state == "unavailable":
                 continue
-
-            # Z-Wave mains-only filter
-            if group == GROUP_ZWAVE and zwave_mains_only:
+            group = INTEGRATION_GROUP_MAP.get(entity_entry.platform, "other")
+            if group == GROUP_ZWAVE and self.zwave_mains_only:
                 if self._is_battery_device(entity_entry):
-                    _LOGGER.debug(
-                        "Skipping battery Z-Wave device: %s",
-                        entity_entry.entity_id,
-                    )
                     continue
-
             item = QueueItem(entity_entry.entity_id, group)
             item.friendly_name = (
                 state.attributes.get("friendly_name") or entity_entry.entity_id
             )
             item.installed_version = state.attributes.get("installed_version")
             item.latest_version = state.attributes.get("latest_version")
-
-            if mode == EXEC_MODE_MANUAL_ONLY:
-                item.status = ITEM_STATUS_WAITING_APPROVAL
-            else:
-                item.status = ITEM_STATUS_PENDING
-
             candidates.append(item)
 
-        _LOGGER.info("Discovered %d eligible update entities", len(candidates))
-        return candidates
-
-    # ------------------------------------------------------------------
-    # Queue management
-    # ------------------------------------------------------------------
-
-    async def async_refresh_candidates(self) -> int:
-        """Refresh the queue: add new candidates, remove stale ones."""
-        candidates = await self.async_discover_updates()
+        existing_ids = {i.entity_id for i in self._items}
         candidate_ids = {c.entity_id for c in candidates}
-        existing_ids = {item.entity_id for item in self._queue}
-
         new_count = 0
-        for candidate in candidates:
-            if candidate.entity_id not in existing_ids:
-                self._queue.append(candidate)
+        for c in candidates:
+            if c.entity_id not in existing_ids:
+                self._items.append(c)
                 new_count += 1
-
-        # Keep items that are still candidates OR are actively being processed
-        self._queue = [
-            item
-            for item in self._queue
-            if item.entity_id in candidate_ids
-            or item.status
-            in (ITEM_STATUS_INSTALLING, ITEM_STATUS_COMPLETED, ITEM_STATUS_FAILED)
+        self._items = [
+            i for i in self._items
+            if i.entity_id in candidate_ids
+            or i.status in (ITEM_STATUS_INSTALLING, ITEM_STATUS_COMPLETED, ITEM_STATUS_FAILED)
         ]
-
-        # Sort by group execution order
-        group_order = {g: i for i, g in enumerate(GROUP_EXECUTION_ORDER)}
-        self._queue.sort(key=lambda x: group_order.get(x.group, 99))
-
-        await self.async_save()
-        self._notify_listeners()
+        self._notify()
         _LOGGER.info(
-            "Refreshed candidates: %d total, %d new", len(self._queue), new_count
+            "Queue '%s': %d candidates, %d new, %d total",
+            self.name, len(candidates), new_count, len(self._items),
         )
-        return len(self._queue)
+        return len(self._items)
 
-    async def async_approve_item(self, entity_id: str) -> None:
-        """Approve a manual_only item so it will be installed."""
-        for item in self._queue:
-            if (
-                item.entity_id == entity_id
-                and item.status == ITEM_STATUS_WAITING_APPROVAL
-            ):
-                item.status = ITEM_STATUS_APPROVED
-                _LOGGER.info("Approved for update: %s", entity_id)
-                self._notify_listeners()
-                await self.async_save()
-                return
-        _LOGGER.warning("No item waiting approval for: %s", entity_id)
-
-    async def async_approve_all(self) -> int:
-        """Approve all items currently waiting for approval."""
-        count = 0
-        for item in self._queue:
-            if item.status == ITEM_STATUS_WAITING_APPROVAL:
-                item.status = ITEM_STATUS_APPROVED
-                count += 1
-        if count:
-            _LOGGER.info("Approved %d items for update", count)
-            self._notify_listeners()
-            await self.async_save()
-        return count
-
-    async def async_start_queue(self) -> None:
-        """Start processing the update queue."""
+    async def async_start(self) -> None:
         if self._state == QUEUE_STATE_RUNNING:
-            _LOGGER.warning("Queue is already running")
             return
-
-        await self.async_refresh_candidates()
-
-        runnable = [
-            i
-            for i in self._queue
-            if i.status in (ITEM_STATUS_PENDING, ITEM_STATUS_APPROVED)
-        ]
+        await self.async_scan()
+        runnable = [i for i in self._items if i.status == ITEM_STATUS_PENDING]
         if not runnable:
-            _LOGGER.info("No updates ready to install")
-            self._notify_listeners()
-            return
-
-        self._state = QUEUE_STATE_RUNNING
-        self._notify_listeners()
-        await self.async_save()
-        self._task = self.hass.async_create_task(self._async_process_queue())
-
-    async def async_pause_queue(self) -> None:
-        """Pause the queue processing."""
-        if self._state != QUEUE_STATE_RUNNING:
-            return
-        self._state = QUEUE_STATE_PAUSED
-        self._notify_listeners()
-        await self.async_save()
-        _LOGGER.info("Queue paused")
-
-    async def async_resume_queue(self) -> None:
-        """Resume the queue processing."""
-        if self._state != QUEUE_STATE_PAUSED:
             return
         self._state = QUEUE_STATE_RUNNING
-        self._notify_listeners()
-        await self.async_save()
-        _LOGGER.info("Queue resumed")
+        self._notify()
+        self._task = self.hass.async_create_task(self._async_process())
 
-    async def async_stop_queue(self) -> None:
-        """Stop the queue processing."""
+    async def async_stop(self) -> None:
         self._state = QUEUE_STATE_STOPPED
         if self._task and not self._task.done():
             self._task.cancel()
@@ -496,284 +364,234 @@ class UpdateQueueManager:
             except asyncio.CancelledError:
                 pass
         self._current_item = None
-        self._notify_listeners()
-        await self.async_save()
-        _LOGGER.info("Queue stopped")
+        self._notify()
+
+    async def async_pause(self) -> None:
+        if self._state == QUEUE_STATE_RUNNING:
+            self._state = QUEUE_STATE_PAUSED
+            self._notify()
+
+    async def async_resume(self) -> None:
+        if self._state == QUEUE_STATE_PAUSED:
+            self._state = QUEUE_STATE_RUNNING
+            self._notify()
 
     async def async_skip_current(self) -> None:
-        """Skip the currently installing update."""
         if self._current_item:
             self._current_item.status = ITEM_STATUS_SKIPPED
             self._current_item.completed_at = datetime.now()
-            _LOGGER.info(
-                "Skipping current update: %s", self._current_item.entity_id
-            )
             self._current_item = None
-            self._notify_listeners()
+            self._notify()
 
-    async def async_install_entity(self, entity_id: str) -> None:
-        """Install a specific entity immediately (outside queue)."""
-        _LOGGER.info("Manual install requested for: %s", entity_id)
-        await self._async_install_single(entity_id)
-
-    async def async_install_all_eligible(self) -> None:
-        """Shortcut: start the queue (discovers + installs)."""
-        await self.async_start_queue()
-
-    async def async_clear_queue(self) -> None:
-        """Clear all items from the queue and reset counters."""
-        self._queue.clear()
+    async def async_clear(self) -> None:
+        self._items.clear()
         self._current_item = None
         self._completed_count = 0
         self._failed_count = 0
         self._state = QUEUE_STATE_IDLE
-        self._notify_listeners()
-        await self.async_save()
-        _LOGGER.info("Queue cleared")
+        self._notify()
 
-    # ------------------------------------------------------------------
-    # Processing loop
-    # ------------------------------------------------------------------
-
-    async def _async_process_queue(self) -> None:
-        """Process the queue group-by-group in execution-order."""
-        _LOGGER.info("Starting queue processing with %d items", len(self._queue))
-
-        for group in GROUP_EXECUTION_ORDER:
-            if self._state == QUEUE_STATE_STOPPED:
-                break
-
-            mode = self._get_group_mode(group)
-            if mode == EXEC_MODE_DISABLED:
-                continue
-
-            group_items = [
-                i
-                for i in self._queue
-                if i.group == group
-                and i.status in (ITEM_STATUS_PENDING, ITEM_STATUS_APPROVED)
-            ]
-            if not group_items:
-                continue
-
-            _LOGGER.info(
-                "Processing group '%s' (%d items, mode=%s)",
-                GROUP_DISPLAY_NAMES.get(group, group),
-                len(group_items),
-                mode,
-            )
-
-            if mode == EXEC_MODE_SEQUENTIAL:
-                await self._process_group_sequential(group_items)
-            elif mode == EXEC_MODE_PARALLEL:
-                # Safety overrides: Z-Wave and HA Core/OS are NEVER parallel
-                if group == GROUP_ZWAVE:
-                    _LOGGER.warning("Z-Wave forced to sequential for safety")
-                    await self._process_group_sequential(group_items)
-                elif group in (GROUP_HA_CORE, GROUP_HA_OS):
-                    _LOGGER.warning("HA Core/OS forced to sequential for safety")
-                    await self._process_group_sequential(group_items)
-                else:
-                    await self._process_group_parallel(group_items)
-            elif mode == EXEC_MODE_MANUAL_ONLY:
-                approved = [
-                    i for i in group_items if i.status == ITEM_STATUS_APPROVED
-                ]
-                if approved:
-                    await self._process_group_sequential(approved)
-
-        # Done
-        if self._state == QUEUE_STATE_RUNNING:
-            self._state = QUEUE_STATE_IDLE
-        self._current_item = None
-        self._notify_listeners()
-        await self.async_save()
-        _LOGGER.info(
-            "Queue processing complete. Completed: %d, Failed: %d",
-            self._completed_count,
-            self._failed_count,
-        )
-
-    async def _process_group_sequential(self, items: list[QueueItem]) -> None:
-        """Install items one at a time, waiting for each to finish."""
-        for item in items:
-            if self._state == QUEUE_STATE_STOPPED:
-                break
-
-            # Wait while paused
-            while self._state == QUEUE_STATE_PAUSED:
-                await asyncio.sleep(5)
-                if self._state == QUEUE_STATE_STOPPED:
-                    return
-
-            # Maintenance window check
-            if not self._is_in_maintenance_window():
-                _LOGGER.info("Outside maintenance window, waiting...")
-                while not self._is_in_maintenance_window():
-                    await asyncio.sleep(60)
-                    if self._state == QUEUE_STATE_STOPPED:
-                        return
-
-            self._current_item = item
-            item.status = ITEM_STATUS_INSTALLING
-            item.started_at = datetime.now()
-            self._notify_listeners()
-
-            success = await self._async_install_single(item.entity_id)
-            await self._handle_install_result(item, success)
-
-            self._current_item = None
-            self._notify_listeners()
-            await self.async_save()
-
-            delay = self.options.get(CONF_INSTALL_DELAY, DEFAULT_INSTALL_DELAY)
-            if delay > 0 and self._state == QUEUE_STATE_RUNNING:
-                await asyncio.sleep(delay)
-
-    async def _process_group_parallel(self, items: list[QueueItem]) -> None:
-        """Install all items in parallel, wait for all to finish."""
-        if not self._is_in_maintenance_window():
-            _LOGGER.info("Outside maintenance window, waiting...")
-            while not self._is_in_maintenance_window():
-                await asyncio.sleep(60)
-                if self._state == QUEUE_STATE_STOPPED:
-                    return
-
-        _LOGGER.info("Installing %d items in parallel", len(items))
-        for item in items:
-            item.status = ITEM_STATUS_INSTALLING
-            item.started_at = datetime.now()
-        self._notify_listeners()
-
-        tasks = [self._async_install_single(item.entity_id) for item in items]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        for item, result in zip(items, results):
-            if isinstance(result, Exception):
-                await self._handle_install_result(item, False, str(result))
-            else:
-                await self._handle_install_result(item, result)
-
-        self._notify_listeners()
-        await self.async_save()
-
-    # ------------------------------------------------------------------
-    # Install helpers
-    # ------------------------------------------------------------------
-
-    async def _handle_install_result(
-        self, item: QueueItem, success: bool, error_msg: str | None = None
-    ) -> None:
-        """Record the result of an install attempt."""
-        if success:
-            item.status = ITEM_STATUS_COMPLETED
-            item.completed_at = datetime.now()
-            self._last_success = item.entity_id
-            self._completed_count += 1
-            _LOGGER.info("Successfully updated: %s", item.entity_id)
-        else:
-            max_retries = self.options.get(CONF_MAX_RETRIES, DEFAULT_MAX_RETRIES)
-            item.retries += 1
-            item.error = error_msg
-            if item.retries >= max_retries:
-                item.status = ITEM_STATUS_FAILED
-                item.completed_at = datetime.now()
-                self._last_failure = item.entity_id
-                self._failed_count += 1
-                _LOGGER.error(
-                    "Update failed after %d retries: %s",
-                    item.retries,
-                    item.entity_id,
-                )
-                if self.options.get(CONF_STOP_ON_FAILURE, False):
-                    _LOGGER.info(
-                        "Stopping queue on failure (stop_on_failure=true)"
-                    )
-                    self._state = QUEUE_STATE_STOPPED
-            else:
-                item.status = ITEM_STATUS_PENDING
-                _LOGGER.warning(
-                    "Update failed, will retry (%d/%d): %s",
-                    item.retries,
-                    max_retries,
-                    item.entity_id,
-                )
-
-    async def _async_install_single(self, entity_id: str) -> bool:
-        """Install one update entity and poll for completion."""
-        _LOGGER.info("Installing update: %s", entity_id)
-
-        state = self.hass.states.get(entity_id)
-        if state is None:
-            _LOGGER.warning("Entity not found: %s", entity_id)
-            return False
-        if state.state != STATE_ON:
-            _LOGGER.info(
-                "No update available for %s (state=%s)", entity_id, state.state
-            )
-            return True  # Consider it done
-
+    async def _async_process(self) -> None:
         try:
-            await self.hass.services.async_call(
-                "update",
-                "install",
-                {"entity_id": entity_id},
-                blocking=False,
-            )
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.error(
-                "Failed to call update.install for %s: %s", entity_id, err
-            )
-            return False
+            if self.exec_mode == EXEC_MODE_PARALLEL:
+                await self._process_parallel()
+            else:
+                await self._process_sequential()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            _LOGGER.exception("Queue '%s': error", self.name)
+        finally:
+            if self._state == QUEUE_STATE_RUNNING:
+                self._state = QUEUE_STATE_IDLE
+            self._current_item = None
+            self._notify()
 
-        timeout = self.options.get(CONF_INSTALL_TIMEOUT, DEFAULT_INSTALL_TIMEOUT)
-        elapsed = 0
-        poll_interval = 10
-
-        while elapsed < timeout:
-            await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
-
-            if self._state == QUEUE_STATE_STOPPED:
-                return False
-
-            state = self.hass.states.get(entity_id)
-            if state is None:
-                _LOGGER.warning(
-                    "Entity disappeared during update: %s", entity_id
-                )
-                return False
-
-            in_progress = state.attributes.get("in_progress")
-            if in_progress is True or (
-                isinstance(in_progress, (int, float)) and in_progress > 0
-            ):
+    async def _process_sequential(self) -> None:
+        for item in self._items:
+            if self._state != QUEUE_STATE_RUNNING:
+                break
+            if item.status != ITEM_STATUS_PENDING:
                 continue
+            while self._state == QUEUE_STATE_PAUSED:
+                await asyncio.sleep(1)
+            if self._state != QUEUE_STATE_RUNNING:
+                break
+            self._current_item = item
+            success = await self._install_item(item)
+            self._current_item = None
+            if not success and self.stop_on_failure:
+                self._state = QUEUE_STATE_STOPPED
+                break
+            if self.install_delay > 0:
+                await asyncio.sleep(self.install_delay)
 
-            if state.state != STATE_ON:
-                _LOGGER.info("Update completed for %s", entity_id)
-                return True
-
-            if in_progress is False or in_progress is None:
-                if elapsed > 60:
-                    _LOGGER.warning("Update stalled for %s", entity_id)
-                    return False
-
-        _LOGGER.error(
-            "Update timed out after %ds for %s", timeout, entity_id
+    async def _process_parallel(self) -> None:
+        pending = [i for i in self._items if i.status == ITEM_STATUS_PENDING]
+        await asyncio.gather(
+            *[self._install_item(i) for i in pending], return_exceptions=True
         )
+
+    async def _install_item(self, item: QueueItem) -> bool:
+        item.status = ITEM_STATUS_INSTALLING
+        item.started_at = datetime.now()
+        self._notify()
+        for attempt in range(self.max_retries + 1):
+            item.retries = attempt
+            try:
+                await self.hass.services.async_call(
+                    "update", "install",
+                    {"entity_id": item.entity_id},
+                    blocking=True,
+                )
+                if await self._wait_for_completion(item):
+                    item.status = ITEM_STATUS_COMPLETED
+                    item.completed_at = datetime.now()
+                    self._completed_count += 1
+                    self._last_success = item.entity_id
+                    self._notify()
+                    return True
+            except Exception as exc:
+                item.error = str(exc)
+            if attempt < self.max_retries:
+                await asyncio.sleep(5)
+        item.status = ITEM_STATUS_FAILED
+        item.completed_at = datetime.now()
+        self._failed_count += 1
+        self._last_failure = item.entity_id
+        self._notify()
         return False
 
-    # ------------------------------------------------------------------
-    # Shutdown
-    # ------------------------------------------------------------------
+    async def _wait_for_completion(self, item: QueueItem) -> bool:
+        elapsed = 0
+        while elapsed < self.install_timeout:
+            state = self.hass.states.get(item.entity_id)
+            if state is None:
+                return True
+            in_progress = state.attributes.get("in_progress")
+            if in_progress is False or in_progress is None:
+                if state.state != STATE_ON:
+                    return True
+            await asyncio.sleep(5)
+            elapsed += 5
+        item.error = f"Timed out after {self.install_timeout}s"
+        return False
 
     async def async_shutdown(self) -> None:
-        """Shut down the queue manager."""
         if self._task and not self._task.done():
             self._task.cancel()
             try:
                 await self._task
             except asyncio.CancelledError:
                 pass
+
+
+class QueueCoordinator:
+    """Manages all named queues for a config entry."""
+
+    def __init__(
+        self, hass: HomeAssistant, queues_config: list[dict[str, Any]]
+    ) -> None:
+        self.hass = hass
+        self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+        self._queues: list[NamedQueue] = []
+        self._listeners: list[Any] = []
+        for qc in queues_config:
+            self._queues.append(NamedQueue(hass, qc))
+
+    @property
+    def queues(self) -> list[NamedQueue]:
+        return list(self._queues)
+
+    def get_queue(self, name: str) -> NamedQueue | None:
+        name_lower = name.lower()
+        for q in self._queues:
+            if q.name.lower() == name_lower:
+                return q
+        return None
+
+    def get_queue_by_slug(self, slug: str) -> NamedQueue | None:
+        for q in self._queues:
+            if q.slug == slug:
+                return q
+        return None
+
+    def add_queue(self, config: dict[str, Any]) -> NamedQueue:
+        q = NamedQueue(self.hass, config)
+        self._queues.append(q)
+        self._notify_global()
+        return q
+
+    def remove_queue(self, name: str) -> bool:
+        q = self.get_queue(name)
+        if q:
+            self._queues.remove(q)
+            self._notify_global()
+            return True
+        return False
+
+    def update_queue_config(
+        self, name: str, new_config: dict[str, Any]
+    ) -> bool:
+        q = self.get_queue(name)
+        if q:
+            q.config.update(new_config)
+            q.name = q.config.get("name", q.name)
+            q.slug = _slugify(q.name)
+            return True
+        return False
+
+    async def async_scan_all(self) -> dict[str, int]:
+        results = {}
+        for q in self._queues:
+            if q.enabled:
+                count = await q.async_scan()
+                results[q.name] = count
         await self.async_save()
+        self._notify_global()
+        return results
+
+    async def async_start_all(self) -> None:
+        for q in self._queues:
+            if q.enabled and q.pending_count > 0:
+                await q.async_start()
+        await self.async_save()
+
+    async def async_stop_all(self) -> None:
+        for q in self._queues:
+            if q.state == QUEUE_STATE_RUNNING:
+                await q.async_stop()
+        await self.async_save()
+
+    def register_global_listener(self, listener: Any) -> None:
+        self._listeners.append(listener)
+
+    def remove_global_listener(self, listener: Any) -> None:
+        if listener in self._listeners:
+            self._listeners.remove(listener)
+
+    @callback
+    def _notify_global(self) -> None:
+        for ln in self._listeners:
+            ln()
+
+    async def async_load(self) -> None:
+        data = await self._store.async_load()
+        if not data or "queues" not in data:
+            return
+        saved = data["queues"]
+        for q in self._queues:
+            if q.name in saved:
+                q.load_state(saved[q.name])
+
+    async def async_save(self) -> None:
+        data = {"queues": {q.name: q.to_dict() for q in self._queues}}
+        await self._store.async_save(data)
+
+    async def async_shutdown(self) -> None:
+        for q in self._queues:
+            await q.async_shutdown()
+        await self.async_save()
+
+    def get_all_queues_config(self) -> list[dict[str, Any]]:
+        return [dict(q.config) for q in self._queues]

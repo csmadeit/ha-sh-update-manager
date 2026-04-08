@@ -1,6 +1,6 @@
-"""Switch entities for SH Auto Update Manager.
+"""Switch entities for SH Auto Update Manager v1.2.0.
 
-Provides auto-start toggle and pause queue toggle.
+Per-queue pause switches plus a global pause-all switch.
 
 by Smarter Homes LLC — smarter.homes
 """
@@ -14,12 +14,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, CONF_AUTO_START, QUEUE_STATE_PAUSED, QUEUE_STATE_RUNNING
-from .queue_manager import UpdateQueueManager
+from .const import DOMAIN, SW_VERSION, QUEUE_STATE_PAUSED, QUEUE_STATE_RUNNING
+from .queue_manager import QueueCoordinator, NamedQueue
 
 _LOGGER = logging.getLogger(__name__)
-
-SW_VERSION = "1.1.0"
 
 
 async def async_setup_entry(
@@ -28,35 +26,24 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up switch entities."""
-    queue_manager: UpdateQueueManager = hass.data[DOMAIN][entry.entry_id][
-        "queue_manager"
+    coordinator: QueueCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+
+    entities: list[SwitchEntity] = [
+        PauseAllSwitch(entry, coordinator),
     ]
 
-    entities = [
-        AutoStartSwitch(hass, entry, queue_manager),
-        PauseQueueSwitch(entry, queue_manager),
-    ]
+    for queue in coordinator.queues:
+        entities.append(PauseQueueSwitch(entry, queue, coordinator))
+        entities.append(QueueEnabledSwitch(hass, entry, queue))
 
     async_add_entities(entities)
 
 
-class SHUpdateManagerSwitchBase(SwitchEntity):
-    """Base class for SH Update Manager switches."""
+class _DeviceInfoMixin:
+    """Mixin to provide consistent device info."""
 
-    _attr_has_entity_name = True
-
-    def __init__(
-        self,
-        entry: ConfigEntry,
-        queue_manager: UpdateQueueManager,
-        key: str,
-        name: str,
-    ) -> None:
-        self._entry = entry
-        self._queue_manager = queue_manager
-        self._attr_unique_id = f"{entry.entry_id}_{key}"
-        self._attr_name = name
-        self._attr_device_info = {
+    def _make_device_info(self, entry: ConfigEntry) -> dict:
+        return {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "SH Auto Update Manager",
             "manufacturer": "Smarter Homes LLC",
@@ -65,75 +52,123 @@ class SHUpdateManagerSwitchBase(SwitchEntity):
             "configuration_url": "https://smarter.homes",
         }
 
+
+# ---------------------------------------------------------------------------
+# Global switch
+# ---------------------------------------------------------------------------
+
+
+class PauseAllSwitch(_DeviceInfoMixin, SwitchEntity):
+    """Switch to pause/resume all running queues."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:pause-circle"
+
+    def __init__(self, entry: ConfigEntry, coordinator: QueueCoordinator) -> None:
+        self._coordinator = coordinator
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_pause_all"
+        self._attr_name = "Pause All Queues"
+        self._attr_device_info = self._make_device_info(entry)
+
     async def async_added_to_hass(self) -> None:
-        """Register update listener."""
-        self._queue_manager.register_listener(self._handle_update)
+        self._coordinator.register_global_listener(self._handle_update)
+        for q in self._coordinator.queues:
+            q.register_listener(self._handle_update)
 
     async def async_will_remove_from_hass(self) -> None:
-        """Remove update listener."""
-        self._queue_manager.remove_listener(self._handle_update)
+        self._coordinator.remove_global_listener(self._handle_update)
+        for q in self._coordinator.queues:
+            q.remove_listener(self._handle_update)
 
     @callback
     def _handle_update(self) -> None:
-        """Handle queue state update."""
         self.async_write_ha_state()
 
+    @property
+    def is_on(self) -> bool:
+        return any(q.state == QUEUE_STATE_PAUSED for q in self._coordinator.queues)
 
-class AutoStartSwitch(SHUpdateManagerSwitchBase):
-    """Switch to enable/disable auto-start mode.
+    async def async_turn_on(self, **kwargs) -> None:
+        for q in self._coordinator.queues:
+            if q.state == QUEUE_STATE_RUNNING:
+                await q.async_pause()
+        await self._coordinator.async_save()
 
-    When enabled, the queue automatically starts processing when new
-    updates are discovered during a refresh scan.
-    """
+    async def async_turn_off(self, **kwargs) -> None:
+        for q in self._coordinator.queues:
+            if q.state == QUEUE_STATE_PAUSED:
+                await q.async_resume()
+        await self._coordinator.async_save()
 
-    _attr_icon = "mdi:auto-download"
+
+# ---------------------------------------------------------------------------
+# Per-queue switches
+# ---------------------------------------------------------------------------
+
+
+class PauseQueueSwitch(_DeviceInfoMixin, SwitchEntity):
+    """Switch to pause/resume a specific queue."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:pause"
 
     def __init__(
-        self,
-        hass: HomeAssistant,
-        entry: ConfigEntry,
-        queue_manager: UpdateQueueManager,
+        self, entry: ConfigEntry, queue: NamedQueue, coordinator: QueueCoordinator
     ) -> None:
-        super().__init__(
-            entry, queue_manager, "auto_start", "Auto Start Queue"
-        )
+        self._queue = queue
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{entry.entry_id}_{queue.slug}_pause"
+        self._attr_name = f"Pause {queue.name}"
+        self._attr_device_info = self._make_device_info(entry)
+
+    async def async_added_to_hass(self) -> None:
+        self._queue.register_listener(self._handle_update)
+
+    async def async_will_remove_from_hass(self) -> None:
+        self._queue.remove_listener(self._handle_update)
+
+    @callback
+    def _handle_update(self) -> None:
+        self.async_write_ha_state()
+
+    @property
+    def is_on(self) -> bool:
+        return self._queue.state == QUEUE_STATE_PAUSED
+
+    async def async_turn_on(self, **kwargs) -> None:
+        await self._queue.async_pause()
+        await self._coordinator.async_save()
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self._queue.async_resume()
+        await self._coordinator.async_save()
+
+
+class QueueEnabledSwitch(_DeviceInfoMixin, SwitchEntity):
+    """Switch to enable/disable a queue."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:toggle-switch"
+
+    def __init__(
+        self, hass: HomeAssistant, entry: ConfigEntry, queue: NamedQueue
+    ) -> None:
         self._hass = hass
+        self._entry = entry
+        self._queue = queue
+        self._attr_unique_id = f"{entry.entry_id}_{queue.slug}_enabled"
+        self._attr_name = f"Enable {queue.name}"
+        self._attr_device_info = self._make_device_info(entry)
 
     @property
     def is_on(self) -> bool:
-        return self._entry.options.get(CONF_AUTO_START, False)
+        return self._queue.enabled
 
     async def async_turn_on(self, **kwargs) -> None:
-        new_options = dict(self._entry.options)
-        new_options[CONF_AUTO_START] = True
-        self._hass.config_entries.async_update_entry(
-            self._entry, options=new_options
-        )
+        self._queue.config["enabled"] = True
+        self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
-        new_options = dict(self._entry.options)
-        new_options[CONF_AUTO_START] = False
-        self._hass.config_entries.async_update_entry(
-            self._entry, options=new_options
-        )
-
-
-class PauseQueueSwitch(SHUpdateManagerSwitchBase):
-    """Switch to pause/resume the queue."""
-
-    _attr_icon = "mdi:pause-circle"
-
-    def __init__(
-        self, entry: ConfigEntry, queue_manager: UpdateQueueManager
-    ) -> None:
-        super().__init__(entry, queue_manager, "pause_queue", "Pause Queue")
-
-    @property
-    def is_on(self) -> bool:
-        return self._queue_manager.state == QUEUE_STATE_PAUSED
-
-    async def async_turn_on(self, **kwargs) -> None:
-        await self._queue_manager.async_pause_queue()
-
-    async def async_turn_off(self, **kwargs) -> None:
-        await self._queue_manager.async_resume_queue()
+        self._queue.config["enabled"] = False
+        self.async_write_ha_state()

@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "SH Auto Update Manager",
-        "description": "Set up the Auto Update Manager by Smarter Homes LLC (smarter.homes).\n\nThis integration discovers all available Home Assistant updates, groups them by integration type, and installs them with per-group execution modes, manual approval, and safety overrides.\n\nAfter setup, configure per-group rules in the integration options.",
+        "description": "Set up the Auto Update Manager by Smarter Homes LLC (smarter.homes).\n\nThis integration creates named update queues (e.g., Z-Wave Firmware, ESPHome Devices) with independent rules, execution modes, and controls.\n\nDefault queues are created automatically. You can add, edit, or remove queues in the integration options after setup.",
         "data": {}
       }
     },
@@ -14,56 +14,52 @@
   "options": {
     "step": {
       "init": {
-        "title": "Global Settings",
-        "description": "Configure general queue behavior, timing, and maintenance window.",
+        "title": "Queue Manager",
+        "description": "Manage your update queues. Select an action below.",
         "data": {
-          "auto_start": "Auto-start queue when updates are discovered",
-          "zwave_mains_only": "Z-Wave: mains-powered devices only (skip battery devices)",
+          "action": "Action"
+        }
+      },
+      "add_queue": {
+        "title": "Add New Queue",
+        "description": "Create a new update queue with its own match rule and settings.",
+        "data": {
+          "name": "Queue name",
+          "match_type": "Match type",
+          "match_value": "Match value (comma-separated)",
+          "exec_mode": "Execution mode",
+          "trigger_mode": "Trigger mode",
+          "zwave_mains_only": "Z-Wave: mains-powered only",
+          "stop_on_failure": "Stop on first failure",
+          "skip_unavailable": "Skip unavailable devices",
           "install_delay": "Delay between installs (seconds)",
           "install_timeout": "Timeout per update (seconds)",
           "max_retries": "Max retries per update",
-          "stop_on_failure": "Stop queue on first failure",
-          "skip_unavailable": "Skip unavailable/sleeping devices",
-          "maintenance_window_enabled": "Enable maintenance window",
-          "maintenance_window_start": "Maintenance window start (HH:MM)",
-          "maintenance_window_end": "Maintenance window end (HH:MM)"
+          "enabled": "Queue enabled"
         },
         "data_description": {
-          "auto_start": "When enabled, the queue automatically starts processing when new updates are found during a refresh scan. When disabled, you must manually press 'Update All Eligible' to start.",
-          "zwave_mains_only": "Skip battery-powered Z-Wave devices. Battery devices may stall during firmware updates if asleep.",
-          "install_delay": "Wait time between consecutive installs (0-300 seconds).",
-          "install_timeout": "Maximum time to wait for a single update to complete (60-14400 seconds).",
-          "maintenance_window_start": "Updates will only run between start and end times (24h format, e.g. 02:00).",
-          "maintenance_window_end": "Updates will only run between start and end times (24h format, e.g. 05:00)."
+          "match_type": "How to select update entities: by integration, area, label, or specific entity IDs.",
+          "match_value": "Comma-separated values for the match rule (e.g., 'zwave_js,zwave' for integration match).",
+          "exec_mode": "sequential = one at a time; parallel = all at once. Z-Wave is always forced sequential.",
+          "trigger_mode": "manual = start with button press; auto_on_scan = start automatically when updates are found."
         }
       },
-      "group_modes": {
-        "title": "Per-Group Execution Modes",
-        "description": "Choose how updates in each group are processed.\n\n- **sequential**: one at a time, wait for each to finish\n- **parallel**: all at once (safe for independent updates)\n- **disabled**: skip entirely, never auto-update\n- **manual_only**: show in queue but require explicit approval\n\nNote: Z-Wave and HA Core/OS are always forced sequential for safety, even if set to parallel.",
+      "edit_queue": {
+        "title": "Edit Queue",
+        "description": "Modify queue settings.",
         "data": {
-          "mode_zwave": "Z-Wave Firmware",
-          "mode_esphome": "ESPHome Devices",
-          "mode_hacs": "HACS Integrations",
-          "mode_ha_core": "Home Assistant Core",
-          "mode_ha_os": "Home Assistant OS",
-          "mode_addons": "Add-ons",
-          "mode_matter": "Matter Devices",
-          "mode_mqtt": "MQTT Devices",
-          "mode_other": "Other Updates"
-        }
-      },
-      "filters": {
-        "title": "Exclusion Filters",
-        "description": "Exclude specific entities, areas, or labels from the update queue.",
-        "data": {
-          "exclude_entities": "Exclude entities (comma-separated entity IDs)",
-          "exclude_areas": "Exclude areas (comma-separated area IDs)",
-          "exclude_labels": "Exclude labels (comma-separated)"
-        },
-        "data_description": {
-          "exclude_entities": "Comma-separated list of update entity IDs to always skip (e.g., update.my_device_firmware).",
-          "exclude_areas": "Comma-separated list of area IDs to exclude.",
-          "exclude_labels": "Comma-separated list of labels to exclude."
+          "name": "Queue name",
+          "match_type": "Match type",
+          "match_value": "Match value (comma-separated)",
+          "exec_mode": "Execution mode",
+          "trigger_mode": "Trigger mode",
+          "zwave_mains_only": "Z-Wave: mains-powered only",
+          "stop_on_failure": "Stop on first failure",
+          "skip_unavailable": "Skip unavailable devices",
+          "install_delay": "Delay between installs (seconds)",
+          "install_timeout": "Timeout per update (seconds)",
+          "max_retries": "Max retries per update",
+          "enabled": "Queue enabled"
         }
       }
     }
