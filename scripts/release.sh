@@ -40,9 +40,25 @@ echo "Version from manifest.json: $VERSION  (tag: $TAG)"
 
 # ---------------------------------------------------------------------------
 # 3. Accept release title & body (or use defaults)
+#    Branding: "Smarter.Homes" in title, footer in body
 # ---------------------------------------------------------------------------
-TITLE="${1:-$TAG}"
-BODY="${2:-Release $TAG}"
+RAW_TITLE="${1:-$TAG}"
+RAW_BODY="${2:-Release $TAG}"
+
+# Prefix title with "Smarter.Homes Auto Update Manager" if not already branded
+if [[ "$RAW_TITLE" != *"Smarter.Homes"* && "$RAW_TITLE" != *"Smarter Homes"* ]]; then
+  TITLE="Smarter.Homes Auto Update Manager $RAW_TITLE"
+else
+  TITLE="$RAW_TITLE"
+fi
+
+# Append branding footer to body if not already present
+BRANDING_FOOTER=$'\n\n---\n*by Smarter Homes LLC — [smarter.homes](https://smarter.homes)*'
+if [[ "$RAW_BODY" != *"smarter.homes"* && "$RAW_BODY" != *"Smarter Homes LLC"* ]]; then
+  BODY="${RAW_BODY}${BRANDING_FOOTER}"
+else
+  BODY="$RAW_BODY"
+fi
 
 # ---------------------------------------------------------------------------
 # 4. Create the release (will likely be draft despite draft:false)
