@@ -91,3 +91,151 @@ scan_queue:
       required: true
       selector:
         text:
+
+add_queue:
+  name: Add Queue
+  description: Create a new update queue.
+  fields:
+    queue_name:
+      name: Queue Name
+      description: Name for the new queue.
+      required: true
+      example: "Z-Wave Firmware"
+      selector:
+        text:
+    match_type:
+      name: Match Type
+      description: How to match update entities (integration, area, label, entity).
+      required: false
+      default: "integration"
+      selector:
+        select:
+          options:
+            - "integration"
+            - "area"
+            - "label"
+            - "entity"
+    match_value:
+      name: Match Values
+      description: Comma-separated values to match (e.g. "zwave_js,zwave").
+      required: false
+      default: ""
+      selector:
+        text:
+    exec_mode:
+      name: Execution Mode
+      description: How updates are processed (sequential or parallel).
+      required: false
+      default: "sequential"
+      selector:
+        select:
+          options:
+            - "sequential"
+            - "parallel"
+    trigger_mode:
+      name: Trigger Mode
+      description: When the queue runs (manual or auto_on_scan).
+      required: false
+      default: "manual"
+      selector:
+        select:
+          options:
+            - "manual"
+            - "auto_on_scan"
+    battery_handling:
+      name: Battery Handling
+      description: How to handle battery-powered devices.
+      required: false
+      default: "exclude"
+      selector:
+        select:
+          options:
+            - "exclude"
+            - "defer_to_end"
+            - "include"
+    priority:
+      name: Priority
+      description: Queue execution priority (1-100, lower = higher priority).
+      required: false
+      default: 50
+      selector:
+        number:
+          min: 1
+          max: 100
+
+edit_queue:
+  name: Edit Queue
+  description: Edit an existing queue's configuration.
+  fields:
+    queue_name:
+      name: Queue Name
+      description: Name of the queue to edit.
+      required: true
+      selector:
+        text:
+    new_name:
+      name: New Name
+      description: New name for the queue (optional).
+      required: false
+      selector:
+        text:
+    match_type:
+      name: Match Type
+      description: How to match update entities.
+      required: false
+      selector:
+        select:
+          options:
+            - "integration"
+            - "area"
+            - "label"
+            - "entity"
+    match_value:
+      name: Match Values
+      description: Comma-separated values to match.
+      required: false
+      selector:
+        text:
+    exec_mode:
+      name: Execution Mode
+      required: false
+      selector:
+        select:
+          options:
+            - "sequential"
+            - "parallel"
+    trigger_mode:
+      name: Trigger Mode
+      required: false
+      selector:
+        select:
+          options:
+            - "manual"
+            - "auto_on_scan"
+    battery_handling:
+      name: Battery Handling
+      required: false
+      selector:
+        select:
+          options:
+            - "exclude"
+            - "defer_to_end"
+            - "include"
+    priority:
+      name: Priority
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 100
+
+delete_queue:
+  name: Delete Queue
+  description: Delete an update queue.
+  fields:
+    queue_name:
+      name: Queue Name
+      description: Name of the queue to delete.
+      required: true
+      selector:
+        text:

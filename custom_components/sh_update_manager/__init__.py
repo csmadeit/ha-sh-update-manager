@@ -42,7 +42,20 @@ from .const import (
     SERVICE_CLEAR_QUEUE,
     SERVICE_RETRY_FAILED,
     SERVICE_SCAN_QUEUE,
+    SERVICE_ADD_QUEUE,
+    SERVICE_EDIT_QUEUE,
+    SERVICE_DELETE_QUEUE,
     DEFAULT_QUEUES,
+    DEFAULT_INSTALL_DELAY,
+    DEFAULT_INSTALL_TIMEOUT,
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_HISTORY_COUNT,
+    DEFAULT_PRIORITY,
+    EXEC_MODES_LIST,
+    TRIGGER_MODES_LIST,
+    BATTERY_MODES_LIST,
+    MATCH_TYPES_LIST,
+    BATTERY_EXCLUDE,
     PANEL_URL,
     PANEL_TITLE,
     PANEL_ICON,
@@ -174,6 +187,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+def _persist_queues(hass: HomeAssistant, coordinator: QueueCoordinator) -> None:
+    """Persist current queue configs to the config entry options (survives restart)."""
+    for entry_data in hass.data.get(DOMAIN, {}).values():
+        if entry_data.get("coordinator") is coordinator:
+            entry = entry_data.get("entry")
+            if entry:
+                hass.config_entries.async_update_entry(
+                    entry,
+                    options={CONF_QUEUES: coordinator.get_all_queues_config()},
+                )
+                return
+
+
 def _register_services(hass: HomeAssistant, coordinator: QueueCoordinator) -> None:
     """Register all domain services."""
 
@@ -226,6 +252,94 @@ def _register_services(hass: HomeAssistant, coordinator: QueueCoordinator) -> No
             await q.async_scan()
             await coordinator.async_save()
 
+    # --- Queue CRUD services ---
+    async def handle_add_queue(call: ServiceCall) -> None:
+        """Add a new queue and persist to config entry."""
+        new_config = {
+            "name": call.data["queue_name"],
+            "match_type": call.data.get("match_type", "integration"),
+            "match_value": call.data.get("match_value", ""),
+            "exec_mode": call.data.get("exec_mode", "sequential"),
+            "trigger_mode": call.data.get("trigger_mode", "manual"),
+            "battery_handling": call.data.get("battery_handling", BATTERY_EXCLUDE),
+            "stop_on_failure": call.data.get("stop_on_failure", False),
+            "skip_unavailable": call.data.get("skip_unavailable", True),
+            "install_delay": call.data.get("install_delay", DEFAULT_INSTALL_DELAY),
+            "install_timeout": call.data.get("install_timeout", DEFAULT_INSTALL_TIMEOUT),
+            "max_retries": call.data.get("max_retries", DEFAULT_MAX_RETRIES),
+            "history_count": call.data.get("history_count", DEFAULT_HISTORY_COUNT),
+            "priority": call.data.get("priority", DEFAULT_PRIORITY),
+        }
+        coordinator.add_queue(new_config)
+        # Persist to config entry so it survives restarts
+        _persist_queues(hass, coordinator)
+        await coordinator.async_save()
+        _LOGGER.info("Added queue '%s' via service", new_config["name"])
+
+    async def handle_edit_queue(call: ServiceCall) -> None:
+        """Edit an existing queue's configuration."""
+        queue_name = call.data["queue_name"]
+        updates = {}
+        for key in ("new_name", "match_type", "match_value", "exec_mode",
+                     "trigger_mode", "battery_handling", "stop_on_failure",
+                     "skip_unavailable", "install_delay", "install_timeout",
+                     "max_retries", "history_count", "priority"):
+            if key in call.data:
+                # Map new_name -> name for the config dict
+                config_key = "name" if key == "new_name" else key
+                updates[config_key] = call.data[key]
+        if updates:
+            coordinator.update_queue_config(queue_name, updates)
+            _persist_queues(hass, coordinator)
+            await coordinator.async_save()
+            _LOGGER.info("Edited queue '%s' via service", queue_name)
+
+    async def handle_delete_queue(call: ServiceCall) -> None:
+        """Delete a queue."""
+        queue_name = call.data["queue_name"]
+        if coordinator.remove_queue(queue_name):
+            _persist_queues(hass, coordinator)
+            await coordinator.async_save()
+            _LOGGER.info("Deleted queue '%s' via service", queue_name)
+
+    ADD_QUEUE_SCHEMA = vol.Schema({
+        vol.Required("queue_name"): cv.string,
+        vol.Optional("match_type", default="integration"): vol.In(MATCH_TYPES_LIST),
+        vol.Optional("match_value", default=""): cv.string,
+        vol.Optional("exec_mode", default="sequential"): vol.In(EXEC_MODES_LIST),
+        vol.Optional("trigger_mode", default="manual"): vol.In(TRIGGER_MODES_LIST),
+        vol.Optional("battery_handling", default=BATTERY_EXCLUDE): vol.In(BATTERY_MODES_LIST),
+        vol.Optional("stop_on_failure", default=False): cv.boolean,
+        vol.Optional("skip_unavailable", default=True): cv.boolean,
+        vol.Optional("install_delay", default=DEFAULT_INSTALL_DELAY): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=300)),
+        vol.Optional("install_timeout", default=DEFAULT_INSTALL_TIMEOUT): vol.All(
+            vol.Coerce(int), vol.Range(min=60, max=14400)),
+        vol.Optional("max_retries", default=DEFAULT_MAX_RETRIES): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=10)),
+        vol.Optional("history_count", default=DEFAULT_HISTORY_COUNT): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=100)),
+        vol.Optional("priority", default=DEFAULT_PRIORITY): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=100)),
+    })
+
+    EDIT_QUEUE_SCHEMA = vol.Schema({
+        vol.Required("queue_name"): cv.string,
+        vol.Optional("new_name"): cv.string,
+        vol.Optional("match_type"): vol.In(MATCH_TYPES_LIST),
+        vol.Optional("match_value"): cv.string,
+        vol.Optional("exec_mode"): vol.In(EXEC_MODES_LIST),
+        vol.Optional("trigger_mode"): vol.In(TRIGGER_MODES_LIST),
+        vol.Optional("battery_handling"): vol.In(BATTERY_MODES_LIST),
+        vol.Optional("stop_on_failure"): cv.boolean,
+        vol.Optional("skip_unavailable"): cv.boolean,
+        vol.Optional("install_delay"): vol.All(vol.Coerce(int), vol.Range(min=0, max=300)),
+        vol.Optional("install_timeout"): vol.All(vol.Coerce(int), vol.Range(min=60, max=14400)),
+        vol.Optional("max_retries"): vol.All(vol.Coerce(int), vol.Range(min=0, max=10)),
+        vol.Optional("history_count"): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+        vol.Optional("priority"): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+    })
+
     hass.services.async_register(DOMAIN, SERVICE_SCAN_ALL, handle_scan_all)
     hass.services.async_register(DOMAIN, SERVICE_START_QUEUE, handle_start_queue, schema=QUEUE_SERVICE_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_STOP_QUEUE, handle_stop_queue, schema=QUEUE_SERVICE_SCHEMA)
@@ -235,6 +349,9 @@ def _register_services(hass: HomeAssistant, coordinator: QueueCoordinator) -> No
     hass.services.async_register(DOMAIN, SERVICE_CLEAR_QUEUE, handle_clear_queue, schema=QUEUE_SERVICE_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_RETRY_FAILED, handle_retry_failed, schema=QUEUE_SERVICE_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_SCAN_QUEUE, handle_scan_queue, schema=QUEUE_SERVICE_SCHEMA)
+    hass.services.async_register(DOMAIN, SERVICE_ADD_QUEUE, handle_add_queue, schema=ADD_QUEUE_SCHEMA)
+    hass.services.async_register(DOMAIN, SERVICE_EDIT_QUEUE, handle_edit_queue, schema=EDIT_QUEUE_SCHEMA)
+    hass.services.async_register(DOMAIN, SERVICE_DELETE_QUEUE, handle_delete_queue, schema=QUEUE_SERVICE_SCHEMA)
 
 
 async def _register_panel(hass: HomeAssistant) -> None:

@@ -400,21 +400,42 @@ class NamedQueue:
     async def async_scan(self) -> int:
         ent_reg = er.async_get(self.hass)
         candidates: list[QueueItem] = []
+        skipped_no_update = 0
+        skipped_disabled = 0
+        skipped_no_match = 0
+        skipped_not_on = 0
+        skipped_unavailable = 0
+        skipped_battery = 0
         for entity_entry in ent_reg.entities.values():
             if not entity_entry.entity_id.startswith("update."):
+                skipped_no_update += 1
                 continue
             if entity_entry.disabled:
+                skipped_disabled += 1
                 continue
             if not self._entity_matches(entity_entry):
+                skipped_no_match += 1
                 continue
             state = self.hass.states.get(entity_entry.entity_id)
             if state is None or state.state != STATE_ON:
+                skipped_not_on += 1
+                _LOGGER.debug(
+                    "Queue '%s': skip %s (state=%s, need 'on')",
+                    self.name, entity_entry.entity_id,
+                    state.state if state else "None",
+                )
                 continue
             if self.skip_unavailable and state.state == "unavailable":
+                skipped_unavailable += 1
                 continue
             group = INTEGRATION_GROUP_MAP.get(entity_entry.platform, "other")
             is_battery = self._is_battery_device(entity_entry)
             if self.battery_handling == BATTERY_EXCLUDE and is_battery:
+                skipped_battery += 1
+                _LOGGER.debug(
+                    "Queue '%s': skip %s (battery device, battery_handling=exclude)",
+                    self.name, entity_entry.entity_id,
+                )
                 continue
             item = QueueItem(entity_entry.entity_id, group)
             item.is_battery = is_battery
@@ -448,8 +469,11 @@ class NamedQueue:
 
         self._notify()
         _LOGGER.info(
-            "Queue '%s': %d candidates, %d new, %d total",
+            "Queue '%s': %d candidates, %d new, %d total "
+            "(skipped: %d disabled, %d no-match, %d not-on, %d unavail, %d battery)",
             self.name, len(candidates), new_count, len(self._items),
+            skipped_disabled, skipped_no_match, skipped_not_on,
+            skipped_unavailable, skipped_battery,
         )
         return len(self._items)
 

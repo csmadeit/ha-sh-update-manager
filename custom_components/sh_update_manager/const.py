@@ -7,7 +7,7 @@ by Smarter Homes LLC — smarter.homes
 """
 
 DOMAIN = "sh_update_manager"
-SW_VERSION = "2.0.2"
+SW_VERSION = "2.0.3"
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -232,6 +232,9 @@ SERVICE_SKIP_CURRENT = "skip_current"
 SERVICE_CLEAR_QUEUE = "clear_queue"
 SERVICE_RETRY_FAILED = "retry_failed"
 SERVICE_SCAN_QUEUE = "scan_queue"
+SERVICE_ADD_QUEUE = "add_queue"
+SERVICE_EDIT_QUEUE = "edit_queue"
+SERVICE_DELETE_QUEUE = "delete_queue"
 
 # ---------------------------------------------------------------------------
 # Platforms

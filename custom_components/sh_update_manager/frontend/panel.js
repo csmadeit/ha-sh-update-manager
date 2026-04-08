@@ -1,6 +1,6 @@
 /**
- * SH Auto Update Manager — Sidebar Panel v2.0.0
- * LitElement-based queue management UI.
+ * SH Auto Update Manager — Sidebar Panel v2.0.3
+ * Full queue management UI with Add/Edit/Delete.
  *
  * by Smarter Homes LLC — smarter.homes
  */
@@ -21,6 +21,10 @@ class SHUpdateManagerPanel extends LitElement {
       _loading: { type: Boolean },
       _selectedQueue: { type: Number },
       _showHistory: { type: Boolean },
+      _showForm: { type: String },
+      _editingQueue: { type: Object },
+      _formData: { type: Object },
+      _confirmDelete: { type: String },
     };
   }
 
@@ -60,24 +64,16 @@ class SHUpdateManagerPanel extends LitElement {
         font-weight: 500;
         transition: background 0.2s;
       }
-      .btn-primary {
-        background: var(--primary-color, #03a9f4);
-        color: white;
-      }
-      .btn-primary:hover { opacity: 0.9; }
-      .btn-danger {
-        background: var(--error-color, #db4437);
-        color: white;
-      }
-      .btn-danger:hover { opacity: 0.9; }
-      .btn-secondary {
-        background: var(--secondary-background-color, #e0e0e0);
-        color: var(--primary-text-color);
-      }
-      .btn-success {
-        background: var(--success-color, #4caf50);
-        color: white;
-      }
+      .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+      .btn-primary { background: var(--primary-color, #03a9f4); color: white; }
+      .btn-primary:hover:not(:disabled) { opacity: 0.9; }
+      .btn-danger { background: var(--error-color, #db4437); color: white; }
+      .btn-danger:hover:not(:disabled) { opacity: 0.9; }
+      .btn-secondary { background: var(--secondary-background-color, #e0e0e0); color: var(--primary-text-color); }
+      .btn-success { background: var(--success-color, #4caf50); color: white; }
+      .btn-add { background: #7c4dff; color: white; font-size: 15px; }
+      .btn-add:hover:not(:disabled) { background: #651fff; }
+      .btn-sm { padding: 4px 10px; font-size: 12px; }
       .queue-grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
@@ -100,13 +96,11 @@ class SHUpdateManagerPanel extends LitElement {
         border-left-color: var(--error-color, #db4437);
       }
       .queue-name {
-        font-size: 18px;
-        font-weight: 500;
-        margin-bottom: 8px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
+        font-size: 18px; font-weight: 500; margin-bottom: 8px;
+        display: flex; align-items: center; justify-content: space-between;
       }
+      .queue-name-left { display: flex; align-items: center; gap: 8px; }
+      .queue-name-actions { display: flex; gap: 4px; }
       .queue-status {
         font-size: 12px;
         padding: 2px 8px;
@@ -172,12 +166,42 @@ class SHUpdateManagerPanel extends LitElement {
         font-weight: 600;
       }
       .badge-battery { background: #fff9c4; color: #f57f17; }
-      .empty-state {
-        text-align: center;
-        padding: 48px;
-        color: var(--secondary-text-color);
-      }
+      .empty-state { text-align: center; padding: 48px; color: var(--secondary-text-color); }
       .loading { text-align: center; padding: 48px; }
+      .modal-overlay {
+        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.5); z-index: 1000;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .modal {
+        background: var(--card-background-color, white); border-radius: 12px; padding: 24px;
+        max-width: 520px; width: 90%; max-height: 85vh; overflow-y: auto;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      }
+      .modal h2 { margin: 0 0 16px; font-size: 20px; font-weight: 500; }
+      .form-group { margin-bottom: 14px; }
+      .form-group label {
+        display: block; font-size: 13px; font-weight: 500;
+        margin-bottom: 4px; color: var(--secondary-text-color);
+      }
+      .form-group input, .form-group select {
+        width: 100%; padding: 8px 12px; border: 1px solid var(--divider-color, #ddd);
+        border-radius: 4px; font-size: 14px; box-sizing: border-box;
+        background: var(--primary-background-color, white); color: var(--primary-text-color);
+      }
+      .form-group select { cursor: pointer; }
+      .form-group input:focus, .form-group select:focus {
+        outline: none; border-color: var(--primary-color, #03a9f4);
+      }
+      .form-group .hint { font-size: 11px; color: var(--secondary-text-color); margin-top: 2px; }
+      .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+      .confirm-delete {
+        background: var(--card-background-color, white); border-radius: 12px; padding: 24px;
+        max-width: 400px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.3); text-align: center;
+      }
+      .confirm-delete p { margin: 0 0 20px; font-size: 16px; }
+      .confirm-delete .queue-name-highlight { font-weight: 600; color: var(--error-color, #db4437); }
     `;
   }
 
@@ -187,6 +211,28 @@ class SHUpdateManagerPanel extends LitElement {
     this._loading = true;
     this._selectedQueue = -1;
     this._showHistory = false;
+    this._showForm = "";
+    this._editingQueue = null;
+    this._formData = this._defaultFormData();
+    this._confirmDelete = "";
+  }
+
+  _defaultFormData() {
+    return {
+      queue_name: "",
+      match_type: "integration",
+      match_value: "",
+      exec_mode: "sequential",
+      trigger_mode: "manual",
+      battery_handling: "exclude",
+      stop_on_failure: false,
+      skip_unavailable: true,
+      install_delay: 15,
+      install_timeout: 7200,
+      max_retries: 2,
+      history_count: 25,
+      priority: 50,
+    };
   }
 
   connectedCallback() {
@@ -268,6 +314,7 @@ class SHUpdateManagerPanel extends LitElement {
       setTimeout(() => this._loadData(), 1000);
     } catch (e) {
       console.error("Service call failed:", e);
+      alert("Service call failed: " + (e.message || e));
     }
   }
 
@@ -287,6 +334,106 @@ class SHUpdateManagerPanel extends LitElement {
     this.requestUpdate();
   }
 
+  /* ---- Form management ---- */
+  _openAddForm() {
+    this._formData = this._defaultFormData();
+    this._editingQueue = null;
+    this._showForm = "add";
+    this.requestUpdate();
+  }
+
+  _openEditForm(queue) {
+    this._formData = {
+      queue_name: queue.name,
+      match_type: queue.match_type || "integration",
+      match_value: queue.match_value || "",
+      exec_mode: queue.exec_mode || "sequential",
+      trigger_mode: queue.trigger_mode || "manual",
+      battery_handling: queue.battery_handling || "exclude",
+      stop_on_failure: false,
+      skip_unavailable: true,
+      install_delay: 15,
+      install_timeout: 7200,
+      max_retries: 2,
+      history_count: 25,
+      priority: queue.priority || 50,
+    };
+    this._editingQueue = queue;
+    this._showForm = "edit";
+    this.requestUpdate();
+  }
+
+  _closeForm() {
+    this._showForm = "";
+    this._editingQueue = null;
+    this.requestUpdate();
+  }
+
+  _updateFormField(field, value) {
+    this._formData = Object.assign({}, this._formData);
+    this._formData[field] = value;
+    this.requestUpdate();
+  }
+
+  async _submitForm() {
+    const fd = this._formData;
+    if (!fd.queue_name || !fd.queue_name.trim()) {
+      alert("Queue name is required.");
+      return;
+    }
+    if (this._showForm === "add") {
+      await this._callService("add_queue", {
+        queue_name: fd.queue_name.trim(),
+        match_type: fd.match_type,
+        match_value: fd.match_value,
+        exec_mode: fd.exec_mode,
+        trigger_mode: fd.trigger_mode,
+        battery_handling: fd.battery_handling,
+        stop_on_failure: fd.stop_on_failure,
+        skip_unavailable: fd.skip_unavailable,
+        install_delay: parseInt(fd.install_delay) || 15,
+        install_timeout: parseInt(fd.install_timeout) || 7200,
+        max_retries: parseInt(fd.max_retries) || 2,
+        history_count: parseInt(fd.history_count) || 25,
+        priority: parseInt(fd.priority) || 50,
+      });
+    } else if (this._showForm === "edit" && this._editingQueue) {
+      const data = { queue_name: this._editingQueue.name };
+      if (fd.queue_name.trim() !== this._editingQueue.name) {
+        data.new_name = fd.queue_name.trim();
+      }
+      data.match_type = fd.match_type;
+      data.match_value = fd.match_value;
+      data.exec_mode = fd.exec_mode;
+      data.trigger_mode = fd.trigger_mode;
+      data.battery_handling = fd.battery_handling;
+      data.priority = parseInt(fd.priority) || 50;
+      await this._callService("edit_queue", data);
+    }
+    this._closeForm();
+    // Reload page after delay so HA can process the config change
+    setTimeout(() => window.location.reload(), 3000);
+  }
+
+  _openDeleteConfirm(queueName) {
+    this._confirmDelete = queueName;
+    this.requestUpdate();
+  }
+
+  _closeDeleteConfirm() {
+    this._confirmDelete = "";
+    this.requestUpdate();
+  }
+
+  async _confirmDeleteQueue() {
+    if (this._confirmDelete) {
+      await this._callService("delete_queue", { queue_name: this._confirmDelete });
+      this._confirmDelete = "";
+      setTimeout(() => window.location.reload(), 3000);
+    }
+  }
+
+  /* ---- Rendering ---- */
   _renderItem(item) {
     return html`
       <div class="item-row">
@@ -309,14 +456,25 @@ class SHUpdateManagerPanel extends LitElement {
     return html`
       <div class="queue-card ${queue.state}">
         <div class="queue-name">
-          <span>${queue.name}</span>
-          <span class="queue-status status-${queue.state}">${queue.state}</span>
+          <span class="queue-name-left">
+            ${queue.name}
+            <span class="queue-status status-${queue.state}">${queue.state}</span>
+          </span>
+          <span class="queue-name-actions">
+            <button class="btn btn-secondary btn-sm"
+              @click=${() => this._openEditForm(queue)}
+              title="Edit queue settings">&#9998; Edit</button>
+            <button class="btn btn-danger btn-sm"
+              @click=${() => this._openDeleteConfirm(queue.name)}
+              title="Delete this queue">&times; Delete</button>
+          </span>
         </div>
         <dl class="queue-meta">
           <dt>Priority</dt><dd>${queue.priority}</dd>
           <dt>Mode</dt><dd>${queue.exec_mode}</dd>
           <dt>Trigger</dt><dd>${queue.trigger_mode}</dd>
           <dt>Battery</dt><dd>${queue.battery_handling}</dd>
+          <dt>Match</dt><dd>${queue.match_type}: ${queue.match_value || "(all)"}</dd>
           <dt>Pending</dt><dd>${queue.pending_summary || queue.pending}</dd>
           <dt>Last Run</dt><dd>${queue.last_run_result}</dd>
         </dl>
@@ -381,15 +539,154 @@ class SHUpdateManagerPanel extends LitElement {
     `;
   }
 
+  _renderFormModal() {
+    if (!this._showForm) return "";
+    const isEdit = this._showForm === "edit";
+    const fd = this._formData;
+    return html`
+      <div class="modal-overlay" @click=${(e) => { if (e.target === e.currentTarget) this._closeForm(); }}>
+        <div class="modal">
+          <h2>${isEdit ? "Edit Queue" : "Add New Queue"}</h2>
+
+          <div class="form-group">
+            <label>Queue Name *</label>
+            <input type="text" .value=${fd.queue_name}
+              @input=${(e) => this._updateFormField("queue_name", e.target.value)}
+              placeholder="e.g. Z-Wave Firmware" />
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Match Type</label>
+              <select .value=${fd.match_type}
+                @change=${(e) => this._updateFormField("match_type", e.target.value)}>
+                <option value="integration">Integration</option>
+                <option value="area">Area</option>
+                <option value="label">Label</option>
+                <option value="entity">Entity</option>
+              </select>
+              <div class="hint">How to find update entities for this queue</div>
+            </div>
+            <div class="form-group">
+              <label>Match Values</label>
+              <input type="text" .value=${fd.match_value}
+                @input=${(e) => this._updateFormField("match_value", e.target.value)}
+                placeholder="e.g. zwave_js,zwave" />
+              <div class="hint">Comma-separated integration names, areas, labels, or entity IDs</div>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Execution Mode</label>
+              <select .value=${fd.exec_mode}
+                @change=${(e) => this._updateFormField("exec_mode", e.target.value)}>
+                <option value="sequential">Sequential (one at a time)</option>
+                <option value="parallel">Parallel (all at once)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Trigger Mode</label>
+              <select .value=${fd.trigger_mode}
+                @change=${(e) => this._updateFormField("trigger_mode", e.target.value)}>
+                <option value="manual">Manual (press Start)</option>
+                <option value="auto_on_scan">Auto on Scan</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Battery Handling</label>
+              <select .value=${fd.battery_handling}
+                @change=${(e) => this._updateFormField("battery_handling", e.target.value)}>
+                <option value="exclude">Exclude battery devices</option>
+                <option value="defer_to_end">Include - defer to end</option>
+                <option value="include">Include - mixed in</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Priority (1-100)</label>
+              <input type="number" min="1" max="100" .value=${String(fd.priority)}
+                @input=${(e) => this._updateFormField("priority", e.target.value)} />
+              <div class="hint">Lower = runs first when running all queues</div>
+            </div>
+          </div>
+
+          <details style="margin-top: 8px;">
+            <summary style="cursor:pointer; font-size:13px; color:var(--secondary-text-color);">
+              Advanced Settings
+            </summary>
+            <div style="margin-top: 12px;">
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Install Delay (seconds)</label>
+                  <input type="number" min="0" max="300" .value=${String(fd.install_delay)}
+                    @input=${(e) => this._updateFormField("install_delay", e.target.value)} />
+                  <div class="hint">Wait between each install (0-300s)</div>
+                </div>
+                <div class="form-group">
+                  <label>Install Timeout (seconds)</label>
+                  <input type="number" min="60" max="14400" .value=${String(fd.install_timeout)}
+                    @input=${(e) => this._updateFormField("install_timeout", e.target.value)} />
+                  <div class="hint">Max wait per device (60-14400s)</div>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Max Retries</label>
+                  <input type="number" min="0" max="10" .value=${String(fd.max_retries)}
+                    @input=${(e) => this._updateFormField("max_retries", e.target.value)} />
+                </div>
+                <div class="form-group">
+                  <label>History Count</label>
+                  <input type="number" min="1" max="100" .value=${String(fd.history_count)}
+                    @input=${(e) => this._updateFormField("history_count", e.target.value)} />
+                  <div class="hint">Past runs to keep per queue</div>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <div class="form-actions">
+            <button class="btn btn-secondary" @click=${() => this._closeForm()}>Cancel</button>
+            <button class="btn btn-primary" @click=${() => this._submitForm()}>
+              ${isEdit ? "Save Changes" : "Create Queue"}
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  _renderDeleteConfirm() {
+    if (!this._confirmDelete) return "";
+    return html`
+      <div class="modal-overlay" @click=${(e) => { if (e.target === e.currentTarget) this._closeDeleteConfirm(); }}>
+        <div class="confirm-delete">
+          <p>Are you sure you want to delete queue
+            <span class="queue-name-highlight">"${this._confirmDelete}"</span>?</p>
+          <p style="font-size:13px; color:var(--secondary-text-color);">
+            This will remove the queue and all its settings. Update history will be lost.
+          </p>
+          <div style="display:flex; gap:8px; justify-content:center;">
+            <button class="btn btn-secondary" @click=${() => this._closeDeleteConfirm()}>Cancel</button>
+            <button class="btn btn-danger" @click=${() => this._confirmDeleteQueue()}>Delete Queue</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   render() {
     if (this._loading) {
       return html`<div class="loading">Loading queues...</div>`;
     }
-
     return html`
       <div class="header">
         <h1>SH Update Manager</h1>
         <div class="header-actions">
+          <button class="btn btn-add" @click=${() => this._openAddForm()}>+ Add Queue</button>
           <button class="btn btn-primary" @click=${this._scanAll}>Scan All Queues</button>
           <button class="btn btn-danger" @click=${this._stopAll}>Stop All</button>
           <button class="btn btn-secondary" @click=${() => this._loadData()}>Refresh</button>
@@ -400,7 +697,7 @@ class SHUpdateManagerPanel extends LitElement {
         ? html`
           <div class="empty-state">
             <p>No queues configured yet.</p>
-            <p>Go to Settings &rarr; Devices &amp; Services &rarr; SH Auto Update Manager &rarr; Configure to add queues.</p>
+            <p>Click <strong>"+ Add Queue"</strong> above to create your first update queue.</p>
           </div>
         `
         : html`
@@ -410,6 +707,9 @@ class SHUpdateManagerPanel extends LitElement {
           ${this._showHistory ? this._renderHistory() : ""}
         `
       }
+
+      ${this._renderFormModal()}
+      ${this._renderDeleteConfirm()}
     `;
   }
 }
