@@ -1,10 +1,13 @@
-"""Constants for SH Auto Update Manager v1.2.0 — Queue-based architecture.
+"""Constants for SH Auto Update Manager v2.0.0 — Queue-based architecture.
+
+Device-per-queue design: each queue is a separate HA device with its own
+sensors, buttons, and switches. A hub device provides global controls.
 
 by Smarter Homes LLC — smarter.homes
 """
 
 DOMAIN = "sh_update_manager"
-SW_VERSION = "1.2.2"
+SW_VERSION = "2.0.0"
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -12,6 +15,8 @@ SW_VERSION = "1.2.2"
 DEFAULT_INSTALL_DELAY = 15  # seconds between installs
 DEFAULT_INSTALL_TIMEOUT = 7200  # 2 hours per device
 DEFAULT_MAX_RETRIES = 2
+DEFAULT_HISTORY_COUNT = 25  # past runs to keep per queue
+DEFAULT_PRIORITY = 50  # middle of 1-100 range
 
 # ---------------------------------------------------------------------------
 # Queue states
@@ -38,6 +43,15 @@ TRIGGER_AUTO = "auto_on_scan"
 TRIGGER_MODES_LIST = [TRIGGER_MANUAL, TRIGGER_AUTO]
 
 # ---------------------------------------------------------------------------
+# Battery handling modes
+# ---------------------------------------------------------------------------
+BATTERY_EXCLUDE = "exclude"
+BATTERY_DEFER_TO_END = "defer_to_end"
+BATTERY_INCLUDE = "include"
+
+BATTERY_MODES_LIST = [BATTERY_EXCLUDE, BATTERY_DEFER_TO_END, BATTERY_INCLUDE]
+
+# ---------------------------------------------------------------------------
 # Match rule types — how a queue selects update entities
 # ---------------------------------------------------------------------------
 MATCH_INTEGRATION = "integration"
@@ -48,7 +62,7 @@ MATCH_ENTITY = "entity"
 MATCH_TYPES_LIST = [MATCH_INTEGRATION, MATCH_AREA, MATCH_LABEL, MATCH_ENTITY]
 
 # ---------------------------------------------------------------------------
-# Update groups — logical groupings by integration type (for auto-create)
+# Update groups — logical groupings by integration type
 # ---------------------------------------------------------------------------
 GROUP_ZWAVE = "zwave"
 GROUP_ESPHOME = "esphome"
@@ -98,13 +112,14 @@ DEFAULT_QUEUES: list[dict] = [
         "match_value": "zwave_js,zwave",
         "exec_mode": EXEC_MODE_SEQUENTIAL,
         "trigger_mode": TRIGGER_MANUAL,
-        "zwave_mains_only": True,
+        "battery_handling": BATTERY_EXCLUDE,
         "stop_on_failure": False,
         "skip_unavailable": True,
         "install_delay": DEFAULT_INSTALL_DELAY,
         "install_timeout": DEFAULT_INSTALL_TIMEOUT,
         "max_retries": DEFAULT_MAX_RETRIES,
-        "enabled": True,
+        "history_count": DEFAULT_HISTORY_COUNT,
+        "priority": 10,
     },
     {
         "name": "ESPHome Devices",
@@ -112,13 +127,14 @@ DEFAULT_QUEUES: list[dict] = [
         "match_value": "esphome",
         "exec_mode": EXEC_MODE_SEQUENTIAL,
         "trigger_mode": TRIGGER_MANUAL,
-        "zwave_mains_only": False,
+        "battery_handling": BATTERY_INCLUDE,
         "stop_on_failure": False,
         "skip_unavailable": True,
         "install_delay": DEFAULT_INSTALL_DELAY,
         "install_timeout": DEFAULT_INSTALL_TIMEOUT,
         "max_retries": DEFAULT_MAX_RETRIES,
-        "enabled": True,
+        "history_count": DEFAULT_HISTORY_COUNT,
+        "priority": 20,
     },
     {
         "name": "HACS Updates",
@@ -126,13 +142,14 @@ DEFAULT_QUEUES: list[dict] = [
         "match_value": "hacs",
         "exec_mode": EXEC_MODE_SEQUENTIAL,
         "trigger_mode": TRIGGER_MANUAL,
-        "zwave_mains_only": False,
+        "battery_handling": BATTERY_INCLUDE,
         "stop_on_failure": False,
         "skip_unavailable": True,
         "install_delay": DEFAULT_INSTALL_DELAY,
         "install_timeout": DEFAULT_INSTALL_TIMEOUT,
         "max_retries": DEFAULT_MAX_RETRIES,
-        "enabled": True,
+        "history_count": DEFAULT_HISTORY_COUNT,
+        "priority": 30,
     },
     {
         "name": "Add-ons",
@@ -140,13 +157,14 @@ DEFAULT_QUEUES: list[dict] = [
         "match_value": "hassio_addons,hassio",
         "exec_mode": EXEC_MODE_SEQUENTIAL,
         "trigger_mode": TRIGGER_MANUAL,
-        "zwave_mains_only": False,
+        "battery_handling": BATTERY_INCLUDE,
         "stop_on_failure": False,
         "skip_unavailable": True,
         "install_delay": DEFAULT_INSTALL_DELAY,
         "install_timeout": DEFAULT_INSTALL_TIMEOUT,
         "max_retries": DEFAULT_MAX_RETRIES,
-        "enabled": True,
+        "history_count": DEFAULT_HISTORY_COUNT,
+        "priority": 40,
     },
     {
         "name": "Other Updates",
@@ -154,15 +172,24 @@ DEFAULT_QUEUES: list[dict] = [
         "match_value": "matter,mqtt",
         "exec_mode": EXEC_MODE_SEQUENTIAL,
         "trigger_mode": TRIGGER_MANUAL,
-        "zwave_mains_only": False,
+        "battery_handling": BATTERY_INCLUDE,
         "stop_on_failure": False,
         "skip_unavailable": True,
         "install_delay": DEFAULT_INSTALL_DELAY,
         "install_timeout": DEFAULT_INSTALL_TIMEOUT,
         "max_retries": DEFAULT_MAX_RETRIES,
-        "enabled": True,
+        "history_count": DEFAULT_HISTORY_COUNT,
+        "priority": 50,
     },
 ]
+
+# ---------------------------------------------------------------------------
+# Run result states (for last-run-result sensor)
+# ---------------------------------------------------------------------------
+RUN_RESULT_IDLE = "idle"
+RUN_RESULT_COMPLETED = "completed"
+RUN_RESULT_COMPLETED_WITH_FAILURES = "completed_with_failures"
+RUN_RESULT_FAILED = "failed"
 
 # ---------------------------------------------------------------------------
 # Queue-item statuses
@@ -184,26 +211,27 @@ CONF_MATCH_TYPE = "match_type"
 CONF_MATCH_VALUE = "match_value"
 CONF_EXEC_MODE = "exec_mode"
 CONF_TRIGGER_MODE = "trigger_mode"
-CONF_ZWAVE_MAINS_ONLY = "zwave_mains_only"
+CONF_BATTERY_HANDLING = "battery_handling"
 CONF_STOP_ON_FAILURE = "stop_on_failure"
 CONF_SKIP_UNAVAILABLE = "skip_unavailable"
 CONF_INSTALL_DELAY = "install_delay"
 CONF_INSTALL_TIMEOUT = "install_timeout"
 CONF_MAX_RETRIES = "max_retries"
-CONF_QUEUE_ENABLED = "enabled"
+CONF_HISTORY_COUNT = "history_count"
+CONF_PRIORITY = "priority"
 
 # ---------------------------------------------------------------------------
 # Services
 # ---------------------------------------------------------------------------
 SERVICE_SCAN_ALL = "scan_all"
-SERVICE_START_ALL = "start_all"
-SERVICE_STOP_ALL = "stop_all"
 SERVICE_START_QUEUE = "start_queue"
 SERVICE_STOP_QUEUE = "stop_queue"
 SERVICE_PAUSE_QUEUE = "pause_queue"
 SERVICE_RESUME_QUEUE = "resume_queue"
 SERVICE_SKIP_CURRENT = "skip_current"
 SERVICE_CLEAR_QUEUE = "clear_queue"
+SERVICE_RETRY_FAILED = "retry_failed"
+SERVICE_SCAN_QUEUE = "scan_queue"
 
 # ---------------------------------------------------------------------------
 # Platforms
@@ -214,4 +242,12 @@ PLATFORMS = ["sensor", "button", "switch"]
 # Storage
 # ---------------------------------------------------------------------------
 STORAGE_KEY = f"{DOMAIN}.queues"
-STORAGE_VERSION = 3
+STORAGE_VERSION = 4
+
+# ---------------------------------------------------------------------------
+# Panel / Frontend
+# ---------------------------------------------------------------------------
+PANEL_URL = "sh-update-manager"
+PANEL_TITLE = "Update Manager"
+PANEL_ICON = "mdi:update"
+URL_BASE = f"/api/{DOMAIN}"

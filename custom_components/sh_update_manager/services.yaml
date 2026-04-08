@@ -1,44 +1,34 @@
 scan_all:
   name: Scan All Queues
-  description: >-
-    Scan all enabled queues for new update entities matching their rules.
-
-start_all:
-  name: Start All Queues
-  description: >-
-    Start processing all enabled queues that have pending updates.
-
-stop_all:
-  name: Stop All Queues
-  description: >-
-    Stop all currently running queues.
+  description: Scan all configured queues for pending updates.
 
 start_queue:
   name: Start Queue
-  description: Start processing a specific named queue.
+  description: Start processing a specific queue.
   fields:
     queue_name:
       name: Queue Name
-      description: The name of the queue to start (e.g., "Z-Wave Firmware").
+      description: The name of the queue to start.
       required: true
+      example: "Z-Wave Firmware"
       selector:
         text:
 
 stop_queue:
   name: Stop Queue
-  description: Stop a specific named queue.
+  description: Stop a running queue.
   fields:
     queue_name:
       name: Queue Name
       description: The name of the queue to stop.
       required: true
+      example: "Z-Wave Firmware"
       selector:
         text:
 
 pause_queue:
   name: Pause Queue
-  description: >-
-    Pause a specific queue. Current update finishes but no new updates start.
+  description: Pause a running queue (can be resumed).
   fields:
     queue_name:
       name: Queue Name
@@ -60,23 +50,44 @@ resume_queue:
 
 skip_current:
   name: Skip Current
-  description: Skip the currently installing update in a queue.
+  description: Skip the item currently being installed in a queue.
   fields:
     queue_name:
       name: Queue Name
-      description: The name of the queue to skip the current item in.
+      description: The name of the queue.
       required: true
       selector:
         text:
 
 clear_queue:
   name: Clear Queue
-  description: >-
-    Clear all items from a specific queue and reset its counters.
+  description: Clear all pending items from a queue.
   fields:
     queue_name:
       name: Queue Name
       description: The name of the queue to clear.
+      required: true
+      selector:
+        text:
+
+retry_failed:
+  name: Retry Failed
+  description: Re-queue all failed items in a queue and restart processing.
+  fields:
+    queue_name:
+      name: Queue Name
+      description: The name of the queue.
+      required: true
+      selector:
+        text:
+
+scan_queue:
+  name: Scan Queue
+  description: Scan a single queue for pending updates.
+  fields:
+    queue_name:
+      name: Queue Name
+      description: The name of the queue to scan.
       required: true
       selector:
         text:

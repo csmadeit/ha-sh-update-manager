@@ -1,7 +1,6 @@
-"""Queue manager for SH Auto Update Manager v1.2.0.
+"""Queue manager for SH Auto Update Manager v2.0.0.
 
-Each named queue independently discovers, filters, and installs updates
-matching its rules. Queues run independently of each other.
+Device-per-queue design with history, battery handling, retry, priority.
 
 by Smarter Homes LLC — smarter.homes
 """
@@ -11,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections import deque
 from datetime import datetime
 from typing import Any
 
@@ -36,23 +36,31 @@ from .const import (
     MATCH_AREA,
     MATCH_LABEL,
     MATCH_ENTITY,
+    BATTERY_EXCLUDE,
+    BATTERY_DEFER_TO_END,
     INTEGRATION_GROUP_MAP,
     FORCE_SEQUENTIAL_GROUPS,
-    GROUP_ZWAVE,
+    RUN_RESULT_IDLE,
+    RUN_RESULT_COMPLETED,
+    RUN_RESULT_COMPLETED_WITH_FAILURES,
+    RUN_RESULT_FAILED,
     CONF_MATCH_TYPE,
     CONF_MATCH_VALUE,
     CONF_EXEC_MODE,
     CONF_TRIGGER_MODE,
-    CONF_ZWAVE_MAINS_ONLY,
+    CONF_BATTERY_HANDLING,
     CONF_STOP_ON_FAILURE,
     CONF_SKIP_UNAVAILABLE,
     CONF_INSTALL_DELAY,
     CONF_INSTALL_TIMEOUT,
     CONF_MAX_RETRIES,
-    CONF_QUEUE_ENABLED,
+    CONF_HISTORY_COUNT,
+    CONF_PRIORITY,
     DEFAULT_INSTALL_DELAY,
     DEFAULT_INSTALL_TIMEOUT,
     DEFAULT_MAX_RETRIES,
+    DEFAULT_HISTORY_COUNT,
+    DEFAULT_PRIORITY,
     STORAGE_KEY,
     STORAGE_VERSION,
 )
@@ -74,9 +82,10 @@ class QueueItem:
         self.friendly_name: str | None = None
         self.installed_version: str | None = None
         self.latest_version: str | None = None
+        self.is_battery: bool = False
+        self.duration: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to dict for storage."""
         return {
             "entity_id": self.entity_id,
             "group": self.group,
@@ -88,11 +97,12 @@ class QueueItem:
             "friendly_name": self.friendly_name,
             "installed_version": self.installed_version,
             "latest_version": self.latest_version,
+            "is_battery": self.is_battery,
+            "duration": self.duration,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "QueueItem":
-        """Deserialize from dict."""
         item = cls(data["entity_id"], data.get("group", "other"))
         item.retries = data.get("retries", 0)
         item.status = data.get("status", ITEM_STATUS_PENDING)
@@ -100,6 +110,8 @@ class QueueItem:
         item.friendly_name = data.get("friendly_name")
         item.installed_version = data.get("installed_version")
         item.latest_version = data.get("latest_version")
+        item.is_battery = data.get("is_battery", False)
+        item.duration = data.get("duration")
         if data.get("started_at"):
             item.started_at = datetime.fromisoformat(data["started_at"])
         if data.get("completed_at"):
@@ -107,8 +119,61 @@ class QueueItem:
         return item
 
 
+class RunRecord:
+    """Record of a single queue run (for history)."""
+
+    def __init__(self) -> None:
+        self.run_id: int = 0
+        self.started: datetime | None = None
+        self.ended: datetime | None = None
+        self.total: int = 0
+        self.succeeded: int = 0
+        self.failed: int = 0
+        self.skipped: int = 0
+        self.result: str = RUN_RESULT_IDLE
+        self.failed_items: list[dict[str, Any]] = []
+        self.succeeded_items: list[dict[str, Any]] = []
+
+    def to_dict(self) -> dict[str, Any]:
+        duration = ""
+        if self.started and self.ended:
+            delta = self.ended - self.started
+            mins = int(delta.total_seconds() // 60)
+            secs = int(delta.total_seconds() % 60)
+            duration = f"{mins}m {secs}s"
+        return {
+            "run_id": self.run_id,
+            "started": self.started.isoformat() if self.started else None,
+            "ended": self.ended.isoformat() if self.ended else None,
+            "duration": duration,
+            "total": self.total,
+            "succeeded": self.succeeded,
+            "failed": self.failed,
+            "skipped": self.skipped,
+            "result": self.result,
+            "failed_items": self.failed_items,
+            "succeeded_items": self.succeeded_items,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RunRecord":
+        rec = cls()
+        rec.run_id = data.get("run_id", 0)
+        rec.total = data.get("total", 0)
+        rec.succeeded = data.get("succeeded", 0)
+        rec.failed = data.get("failed", 0)
+        rec.skipped = data.get("skipped", 0)
+        rec.result = data.get("result", RUN_RESULT_IDLE)
+        rec.failed_items = data.get("failed_items", [])
+        rec.succeeded_items = data.get("succeeded_items", [])
+        if data.get("started"):
+            rec.started = datetime.fromisoformat(data["started"])
+        if data.get("ended"):
+            rec.ended = datetime.fromisoformat(data["ended"])
+        return rec
+
+
 def _slugify(name: str) -> str:
-    """Convert a queue name to a slug for entity IDs."""
     slug = name.lower().strip()
     slug = re.sub(r"[^a-z0-9]+", "_", slug)
     slug = slug.strip("_")
@@ -132,10 +197,14 @@ class NamedQueue:
         self._completed_count = 0
         self._failed_count = 0
         self._listeners: list[Any] = []
+        self._run_history: deque[RunRecord] = deque(maxlen=self.history_count)
+        self._current_run: RunRecord | None = None
+        self._next_run_id = 1
+        self._last_run_result: RunRecord | None = None
 
     @property
-    def enabled(self) -> bool:
-        return self.config.get(CONF_QUEUE_ENABLED, True)
+    def priority(self) -> int:
+        return self.config.get(CONF_PRIORITY, DEFAULT_PRIORITY)
 
     @property
     def match_type(self) -> str:
@@ -160,8 +229,8 @@ class NamedQueue:
         return self.config.get(CONF_TRIGGER_MODE, "manual")
 
     @property
-    def zwave_mains_only(self) -> bool:
-        return self.config.get(CONF_ZWAVE_MAINS_ONLY, False)
+    def battery_handling(self) -> str:
+        return self.config.get(CONF_BATTERY_HANDLING, BATTERY_EXCLUDE)
 
     @property
     def stop_on_failure(self) -> bool:
@@ -182,6 +251,10 @@ class NamedQueue:
     @property
     def max_retries(self) -> int:
         return self.config.get(CONF_MAX_RETRIES, DEFAULT_MAX_RETRIES)
+
+    @property
+    def history_count(self) -> int:
+        return self.config.get(CONF_HISTORY_COUNT, DEFAULT_HISTORY_COUNT)
 
     @property
     def state(self) -> str:
@@ -216,6 +289,14 @@ class NamedQueue:
         return self._last_failure
 
     @property
+    def last_run_result(self) -> RunRecord | None:
+        return self._last_run_result
+
+    @property
+    def run_history(self) -> list[RunRecord]:
+        return list(self._run_history)
+
+    @property
     def items_summary(self) -> list[dict[str, Any]]:
         return [
             {
@@ -224,11 +305,25 @@ class NamedQueue:
                 "status": i.status,
                 "installed_version": i.installed_version,
                 "latest_version": i.latest_version,
+                "is_battery": i.is_battery,
                 "retries": i.retries,
                 "error": i.error,
+                "duration": i.duration,
             }
             for i in self._items
         ]
+
+    @property
+    def pending_summary(self) -> str:
+        pending = [i for i in self._items if i.status == ITEM_STATUS_PENDING]
+        if not pending:
+            return "0 pending"
+        mains = len([i for i in pending if not i.is_battery])
+        battery = len([i for i in pending if i.is_battery])
+        parts = [f"{len(pending)} pending"]
+        if battery > 0:
+            parts.append(f"({mains} mains, {battery} battery)")
+        return " ".join(parts)
 
     def register_listener(self, listener: Any) -> None:
         self._listeners.append(listener)
@@ -251,6 +346,9 @@ class NamedQueue:
             "last_failure": self._last_failure,
             "completed_count": self._completed_count,
             "failed_count": self._failed_count,
+            "run_history": [r.to_dict() for r in self._run_history],
+            "last_run_result": self._last_run_result.to_dict() if self._last_run_result else None,
+            "next_run_id": self._next_run_id,
         }
 
     def load_state(self, data: dict[str, Any]) -> None:
@@ -260,21 +358,24 @@ class NamedQueue:
         self._last_failure = data.get("last_failure")
         self._completed_count = data.get("completed_count", 0)
         self._failed_count = data.get("failed_count", 0)
+        self._next_run_id = data.get("next_run_id", 1)
+        for rd in data.get("run_history", []):
+            self._run_history.append(RunRecord.from_dict(rd))
+        lrr = data.get("last_run_result")
+        if lrr:
+            self._last_run_result = RunRecord.from_dict(lrr)
 
     def _entity_matches(self, entity_entry: er.RegistryEntry) -> bool:
+        targets = {v.strip() for v in self.match_value.split(",") if v.strip()}
         if self.match_type == MATCH_INTEGRATION:
-            targets = {v.strip() for v in self.match_value.split(",") if v.strip()}
             return entity_entry.platform in targets
         if self.match_type == MATCH_AREA:
-            targets = {v.strip() for v in self.match_value.split(",") if v.strip()}
             return entity_entry.area_id in targets if entity_entry.area_id else False
         if self.match_type == MATCH_LABEL:
-            targets = {v.strip() for v in self.match_value.split(",") if v.strip()}
             if hasattr(entity_entry, "labels") and entity_entry.labels:
                 return bool(entity_entry.labels.intersection(targets))
             return False
         if self.match_type == MATCH_ENTITY:
-            targets = {v.strip() for v in self.match_value.split(",") if v.strip()}
             return entity_entry.entity_id in targets
         return False
 
@@ -297,8 +398,6 @@ class NamedQueue:
         return False
 
     async def async_scan(self) -> int:
-        if not self.enabled:
-            return 0
         ent_reg = er.async_get(self.hass)
         candidates: list[QueueItem] = []
         for entity_entry in ent_reg.entities.values():
@@ -314,16 +413,20 @@ class NamedQueue:
             if self.skip_unavailable and state.state == "unavailable":
                 continue
             group = INTEGRATION_GROUP_MAP.get(entity_entry.platform, "other")
-            if group == GROUP_ZWAVE and self.zwave_mains_only:
-                if self._is_battery_device(entity_entry):
-                    continue
+            is_battery = self._is_battery_device(entity_entry)
+            if self.battery_handling == BATTERY_EXCLUDE and is_battery:
+                continue
             item = QueueItem(entity_entry.entity_id, group)
+            item.is_battery = is_battery
             item.friendly_name = (
                 state.attributes.get("friendly_name") or entity_entry.entity_id
             )
             item.installed_version = state.attributes.get("installed_version")
             item.latest_version = state.attributes.get("latest_version")
             candidates.append(item)
+
+        if self.battery_handling == BATTERY_DEFER_TO_END:
+            candidates.sort(key=lambda c: (1 if c.is_battery else 0))
 
         existing_ids = {i.entity_id for i in self._items}
         candidate_ids = {c.entity_id for c in candidates}
@@ -337,6 +440,12 @@ class NamedQueue:
             if i.entity_id in candidate_ids
             or i.status in (ITEM_STATUS_INSTALLING, ITEM_STATUS_COMPLETED, ITEM_STATUS_FAILED)
         ]
+        if self.battery_handling == BATTERY_DEFER_TO_END:
+            pending = [i for i in self._items if i.status == ITEM_STATUS_PENDING]
+            non_pending = [i for i in self._items if i.status != ITEM_STATUS_PENDING]
+            pending.sort(key=lambda i: (1 if i.is_battery else 0))
+            self._items = pending + non_pending
+
         self._notify()
         _LOGGER.info(
             "Queue '%s': %d candidates, %d new, %d total",
@@ -352,6 +461,11 @@ class NamedQueue:
         if not runnable:
             return
         self._state = QUEUE_STATE_RUNNING
+        self._current_run = RunRecord()
+        self._current_run.run_id = self._next_run_id
+        self._next_run_id += 1
+        self._current_run.started = datetime.now()
+        self._current_run.total = len(runnable)
         self._notify()
         self._task = self.hass.async_create_task(self._async_process())
 
@@ -364,6 +478,7 @@ class NamedQueue:
             except asyncio.CancelledError:
                 pass
         self._current_item = None
+        self._finalize_run()
         self._notify()
 
     async def async_pause(self) -> None:
@@ -380,6 +495,8 @@ class NamedQueue:
         if self._current_item:
             self._current_item.status = ITEM_STATUS_SKIPPED
             self._current_item.completed_at = datetime.now()
+            if self._current_run:
+                self._current_run.skipped += 1
             self._current_item = None
             self._notify()
 
@@ -390,6 +507,52 @@ class NamedQueue:
         self._failed_count = 0
         self._state = QUEUE_STATE_IDLE
         self._notify()
+
+    async def async_retry_failed(self) -> None:
+        failed = [i for i in self._items if i.status == ITEM_STATUS_FAILED]
+        if not failed:
+            return
+        for item in failed:
+            item.status = ITEM_STATUS_PENDING
+            item.error = None
+            item.retries = 0
+            item.started_at = None
+            item.completed_at = None
+            item.duration = None
+        self._notify()
+        await self.async_start()
+
+    def _finalize_run(self) -> None:
+        if self._current_run is None:
+            return
+        run = self._current_run
+        run.ended = datetime.now()
+        for item in self._items:
+            if item.status == ITEM_STATUS_COMPLETED:
+                d = {"entity_id": item.entity_id, "friendly_name": item.friendly_name}
+                if item.duration:
+                    d["duration"] = item.duration
+                run.succeeded_items.append(d)
+            elif item.status == ITEM_STATUS_FAILED:
+                run.failed_items.append({
+                    "entity_id": item.entity_id,
+                    "friendly_name": item.friendly_name,
+                    "error": item.error,
+                    "retries": item.retries,
+                })
+        run.succeeded = len(run.succeeded_items)
+        run.failed = len(run.failed_items)
+        if run.failed == 0 and run.succeeded > 0:
+            run.result = RUN_RESULT_COMPLETED
+        elif run.failed > 0 and run.succeeded > 0:
+            run.result = RUN_RESULT_COMPLETED_WITH_FAILURES
+        elif run.failed > 0 and run.succeeded == 0:
+            run.result = RUN_RESULT_FAILED
+        else:
+            run.result = RUN_RESULT_IDLE
+        self._last_run_result = run
+        self._run_history.append(run)
+        self._current_run = None
 
     async def _async_process(self) -> None:
         try:
@@ -405,6 +568,7 @@ class NamedQueue:
             if self._state == QUEUE_STATE_RUNNING:
                 self._state = QUEUE_STATE_IDLE
             self._current_item = None
+            self._finalize_run()
             self._notify()
 
     async def _process_sequential(self) -> None:
@@ -418,6 +582,7 @@ class NamedQueue:
             if self._state != QUEUE_STATE_RUNNING:
                 break
             self._current_item = item
+            self._notify()
             success = await self._install_item(item)
             self._current_item = None
             if not success and self.stop_on_failure:
@@ -447,6 +612,11 @@ class NamedQueue:
                 if await self._wait_for_completion(item):
                     item.status = ITEM_STATUS_COMPLETED
                     item.completed_at = datetime.now()
+                    if item.started_at:
+                        delta = item.completed_at - item.started_at
+                        mins = int(delta.total_seconds() // 60)
+                        secs = int(delta.total_seconds() % 60)
+                        item.duration = f"{mins}m {secs}s"
                     self._completed_count += 1
                     self._last_success = item.entity_id
                     self._notify()
@@ -457,6 +627,11 @@ class NamedQueue:
                 await asyncio.sleep(5)
         item.status = ITEM_STATUS_FAILED
         item.completed_at = datetime.now()
+        if item.started_at:
+            delta = item.completed_at - item.started_at
+            mins = int(delta.total_seconds() // 60)
+            secs = int(delta.total_seconds() % 60)
+            item.duration = f"{mins}m {secs}s"
         self._failed_count += 1
         self._last_failure = item.entity_id
         self._notify()
@@ -503,6 +678,10 @@ class QueueCoordinator:
     def queues(self) -> list[NamedQueue]:
         return list(self._queues)
 
+    @property
+    def queues_by_priority(self) -> list[NamedQueue]:
+        return sorted(self._queues, key=lambda q: q.priority)
+
     def get_queue(self, name: str) -> NamedQueue | None:
         name_lower = name.lower()
         for q in self._queues:
@@ -530,32 +709,26 @@ class QueueCoordinator:
             return True
         return False
 
-    def update_queue_config(
-        self, name: str, new_config: dict[str, Any]
-    ) -> bool:
+    def update_queue_config(self, name: str, new_config: dict[str, Any]) -> bool:
         q = self.get_queue(name)
         if q:
             q.config.update(new_config)
             q.name = q.config.get("name", q.name)
             q.slug = _slugify(q.name)
+            self._notify_global()
             return True
         return False
 
     async def async_scan_all(self) -> dict[str, int]:
         results = {}
         for q in self._queues:
-            if q.enabled:
-                count = await q.async_scan()
-                results[q.name] = count
+            count = await q.async_scan()
+            results[q.name] = count
+            if q.trigger_mode == "auto_on_scan" and q.pending_count > 0:
+                await q.async_start()
         await self.async_save()
         self._notify_global()
         return results
-
-    async def async_start_all(self) -> None:
-        for q in self._queues:
-            if q.enabled and q.pending_count > 0:
-                await q.async_start()
-        await self.async_save()
 
     async def async_stop_all(self) -> None:
         for q in self._queues:
@@ -577,15 +750,14 @@ class QueueCoordinator:
 
     async def async_load(self) -> None:
         data = await self._store.async_load()
-        if not data or "queues" not in data:
-            return
-        saved = data["queues"]
-        for q in self._queues:
-            if q.name in saved:
-                q.load_state(saved[q.name])
+        if data and isinstance(data, dict):
+            for q in self._queues:
+                qdata = data.get(q.slug)
+                if qdata:
+                    q.load_state(qdata)
 
     async def async_save(self) -> None:
-        data = {"queues": {q.name: q.to_dict() for q in self._queues}}
+        data = {q.slug: q.to_dict() for q in self._queues}
         await self._store.async_save(data)
 
     async def async_shutdown(self) -> None:
@@ -594,4 +766,4 @@ class QueueCoordinator:
         await self.async_save()
 
     def get_all_queues_config(self) -> list[dict[str, Any]]:
-        return [dict(q.config) for q in self._queues]
+        return [q.config for q in self._queues]

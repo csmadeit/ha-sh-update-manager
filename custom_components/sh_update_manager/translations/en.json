@@ -2,77 +2,150 @@
   "config": {
     "step": {
       "user": {
-        "title": "SH Auto Update Manager \u2014 Setup",
-        "description": "Select which update queues to create. Each queue manages a group of updates independently.\n\nYou can add, edit, or remove queues later in the integration options.\n\nUncheck all to start empty and create your own custom queues.",
+        "title": "SH Auto Update Manager",
+        "description": "Select which default queues to create. You can add more later in options.\n{queue_info}",
         "data": {
-          "queue_0": "Z-Wave Firmware \u2014 sequential, mains-powered only, manual trigger",
-          "queue_1": "ESPHome Devices \u2014 sequential, manual trigger",
-          "queue_2": "HACS Updates \u2014 sequential, manual trigger",
-          "queue_3": "Add-ons \u2014 sequential, manual trigger",
-          "queue_4": "Other Updates (Matter, MQTT) \u2014 sequential, manual trigger"
-        },
-        "data_description": {
-          "queue_0": "Matches: zwave_js, zwave integrations. Installs one at a time. Skips battery devices.",
-          "queue_1": "Matches: esphome integration. Installs one at a time.",
-          "queue_2": "Matches: hacs integration. Installs one at a time.",
-          "queue_3": "Matches: hassio_addons, hassio integrations. Installs one at a time.",
-          "queue_4": "Matches: matter, mqtt integrations. Installs one at a time."
+          "queue_0": "Z-Wave Firmware (sequential, manual, mains-powered)",
+          "queue_1": "ESPHome Devices (sequential, manual)",
+          "queue_2": "HACS Updates (sequential, manual)",
+          "queue_3": "Add-ons (sequential, manual)",
+          "queue_4": "Other Updates \u2014 Matter, MQTT (sequential, manual)",
+          "queue_info": ""
         }
       }
-    },
-    "abort": {
-      "already_configured": "SH Auto Update Manager is already configured."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Queue Manager",
-        "description": "Manage your update queues. Select an action below.",
+        "title": "Queue Management",
+        "description": "Select an action to manage your update queues.",
         "data": {
           "action": "Action"
         }
       },
       "add_queue": {
         "title": "Add New Queue",
-        "description": "Create a new update queue with its own match rule and settings.",
+        "description": "Configure a new update queue.",
         "data": {
-          "name": "Queue name",
-          "match_type": "Match type",
-          "match_value": "Match value (comma-separated)",
-          "exec_mode": "Execution mode",
-          "trigger_mode": "Trigger mode",
-          "zwave_mains_only": "Z-Wave: mains-powered only",
-          "stop_on_failure": "Stop on first failure",
+          "name": "Queue Name",
+          "match_type": "Match Type (integration, area, label, entity)",
+          "match_value": "Match Values (comma-separated)",
+          "exec_mode": "Execution Mode",
+          "trigger_mode": "Trigger Mode",
+          "battery_handling": "Battery Device Handling",
+          "stop_on_failure": "Stop on failure",
           "skip_unavailable": "Skip unavailable devices",
           "install_delay": "Delay between installs (seconds)",
-          "install_timeout": "Timeout per update (seconds)",
-          "max_retries": "Max retries per update",
-          "enabled": "Queue enabled"
-        },
-        "data_description": {
-          "match_type": "How to select update entities: by integration, area, label, or specific entity IDs.",
-          "match_value": "Comma-separated values for the match rule (e.g., 'zwave_js,zwave' for integration match).",
-          "exec_mode": "sequential = one at a time; parallel = all at once. Z-Wave is always forced sequential.",
-          "trigger_mode": "manual = start with button press; auto_on_scan = start automatically when updates are found."
+          "install_timeout": "Install timeout (seconds)",
+          "max_retries": "Max retries per device",
+          "history_count": "History entries to keep",
+          "priority": "Priority (1=highest, 100=lowest)"
         }
       },
       "edit_queue": {
         "title": "Edit Queue",
-        "description": "Modify queue settings.",
+        "description": "Modify queue configuration.",
         "data": {
-          "name": "Queue name",
-          "match_type": "Match type",
-          "match_value": "Match value (comma-separated)",
-          "exec_mode": "Execution mode",
-          "trigger_mode": "Trigger mode",
-          "zwave_mains_only": "Z-Wave: mains-powered only",
-          "stop_on_failure": "Stop on first failure",
+          "name": "Queue Name",
+          "match_type": "Match Type",
+          "match_value": "Match Values (comma-separated)",
+          "exec_mode": "Execution Mode",
+          "trigger_mode": "Trigger Mode",
+          "battery_handling": "Battery Device Handling",
+          "stop_on_failure": "Stop on failure",
           "skip_unavailable": "Skip unavailable devices",
           "install_delay": "Delay between installs (seconds)",
-          "install_timeout": "Timeout per update (seconds)",
-          "max_retries": "Max retries per update",
-          "enabled": "Queue enabled"
+          "install_timeout": "Install timeout (seconds)",
+          "max_retries": "Max retries per device",
+          "history_count": "History entries to keep",
+          "priority": "Priority (1=highest, 100=lowest)"
+        }
+      }
+    }
+  },
+  "services": {
+    "scan_all": {
+      "name": "Scan All Queues",
+      "description": "Scan all queues for pending updates."
+    },
+    "start_queue": {
+      "name": "Start Queue",
+      "description": "Start processing updates in a queue.",
+      "fields": {
+        "queue_name": {
+          "name": "Queue Name",
+          "description": "Name of the queue to start."
+        }
+      }
+    },
+    "stop_queue": {
+      "name": "Stop Queue",
+      "description": "Stop a running queue.",
+      "fields": {
+        "queue_name": {
+          "name": "Queue Name",
+          "description": "Name of the queue to stop."
+        }
+      }
+    },
+    "pause_queue": {
+      "name": "Pause Queue",
+      "description": "Pause a running queue.",
+      "fields": {
+        "queue_name": {
+          "name": "Queue Name",
+          "description": "Name of the queue to pause."
+        }
+      }
+    },
+    "resume_queue": {
+      "name": "Resume Queue",
+      "description": "Resume a paused queue.",
+      "fields": {
+        "queue_name": {
+          "name": "Queue Name",
+          "description": "Name of the queue to resume."
+        }
+      }
+    },
+    "skip_current": {
+      "name": "Skip Current",
+      "description": "Skip the currently installing item.",
+      "fields": {
+        "queue_name": {
+          "name": "Queue Name",
+          "description": "Name of the queue."
+        }
+      }
+    },
+    "clear_queue": {
+      "name": "Clear Queue",
+      "description": "Clear all items from a queue.",
+      "fields": {
+        "queue_name": {
+          "name": "Queue Name",
+          "description": "Name of the queue to clear."
+        }
+      }
+    },
+    "retry_failed": {
+      "name": "Retry Failed",
+      "description": "Re-queue all failed items and restart the queue.",
+      "fields": {
+        "queue_name": {
+          "name": "Queue Name",
+          "description": "Name of the queue."
+        }
+      }
+    },
+    "scan_queue": {
+      "name": "Scan Queue",
+      "description": "Scan a single queue for pending updates.",
+      "fields": {
+        "queue_name": {
+          "name": "Queue Name",
+          "description": "Name of the queue to scan."
         }
       }
     }

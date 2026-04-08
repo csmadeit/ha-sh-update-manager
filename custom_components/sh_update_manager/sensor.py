@@ -1,212 +1,302 @@
-"""Sensor entities for SH Auto Update Manager v1.2.0.
+"""Sensor entities for SH Auto Update Manager v2.0.0.
 
-Per-queue sensors (status, pending count, items list) plus a global
-overview sensor summarizing all queues.
+Hub device: 1 sensor (overview)
+Per-queue device: 5 sensors (status, pending, items, last_run_result, history)
 
 by Smarter Homes LLC — smarter.homes
 """
 
 from __future__ import annotations
 
-import logging
+import json
+from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, SW_VERSION
+from .const import DOMAIN
 from .queue_manager import QueueCoordinator, NamedQueue
-
-_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up sensor entities for each queue + global overview."""
-    coordinator: QueueCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    data = hass.data[DOMAIN][entry.entry_id]
+    coordinator: QueueCoordinator = data["coordinator"]
 
     entities: list[SensorEntity] = []
+    entities.append(GlobalOverviewSensor(coordinator, entry))
 
-    # Global overview sensor
-    entities.append(GlobalOverviewSensor(entry, coordinator))
-
-    # Per-queue sensors
     for queue in coordinator.queues:
-        entities.append(QueueStatusSensor(entry, queue))
-        entities.append(QueuePendingSensor(entry, queue))
-        entities.append(QueueItemsSensor(entry, queue))
+        entities.append(QueueStatusSensor(queue, entry))
+        entities.append(QueuePendingSensor(queue, entry))
+        entities.append(QueueItemsSensor(queue, entry))
+        entities.append(QueueLastRunResultSensor(queue, entry))
+        entities.append(QueueHistorySensor(queue, entry))
 
     async_add_entities(entities)
 
 
-class _DeviceInfoMixin:
-    """Mixin to provide consistent device info."""
-
-    def _make_device_info(self, entry: ConfigEntry) -> dict:
-        return {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": "SH Auto Update Manager",
-            "manufacturer": "Smarter Homes LLC",
-            "model": "Update Manager",
-            "sw_version": SW_VERSION,
-            "configuration_url": "https://smarter.homes",
-        }
-
-
-# ---------------------------------------------------------------------------
-# Global overview sensor
-# ---------------------------------------------------------------------------
-
-
-class GlobalOverviewSensor(_DeviceInfoMixin, SensorEntity):
-    """Sensor showing a summary across all queues."""
-
+class GlobalOverviewSensor(SensorEntity):
     _attr_has_entity_name = True
     _attr_icon = "mdi:update"
 
-    def __init__(self, entry: ConfigEntry, coordinator: QueueCoordinator) -> None:
+    def __init__(self, coordinator: QueueCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
-        self._attr_unique_id = f"{entry.entry_id}_global_overview"
-        self._attr_name = "Update Manager Overview"
-        self._attr_device_info = self._make_device_info(entry)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_overview"
+        self._attr_name = "Overview"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": "SH Update Manager",
+            "manufacturer": "Smarter Homes LLC",
+            "model": "Update Manager Hub",
+            "sw_version": "2.0.0",
+            "entry_type": "service",
+        }
 
     async def async_added_to_hass(self) -> None:
-        self._coordinator.register_global_listener(self._handle_update)
-        for q in self._coordinator.queues:
-            q.register_listener(self._handle_update)
+        self._coordinator.register_global_listener(self._on_update)
 
     async def async_will_remove_from_hass(self) -> None:
-        self._coordinator.remove_global_listener(self._handle_update)
-        for q in self._coordinator.queues:
-            q.remove_listener(self._handle_update)
+        self._coordinator.remove_global_listener(self._on_update)
 
     @callback
-    def _handle_update(self) -> None:
+    def _on_update(self) -> None:
         self.async_write_ha_state()
 
     @property
     def native_value(self) -> str:
-        states = [q.state for q in self._coordinator.queues]
-        if "running" in states:
-            return "running"
-        if "paused" in states:
-            return "paused"
+        queues = self._coordinator.queues
+        running = [q for q in queues if q.state == "running"]
+        if running:
+            return f"{len(running)} running"
+        total_pending = sum(q.pending_count for q in queues)
+        if total_pending > 0:
+            return f"{total_pending} pending"
         return "idle"
 
     @property
-    def extra_state_attributes(self) -> dict:
-        total_pending = sum(q.pending_count for q in self._coordinator.queues)
-        total_completed = sum(q.completed_count for q in self._coordinator.queues)
-        total_failed = sum(q.failed_count for q in self._coordinator.queues)
-        queues_summary = []
-        for q in self._coordinator.queues:
-            queues_summary.append({
-                "name": q.name,
-                "state": q.state,
-                "enabled": q.enabled,
-                "pending": q.pending_count,
-                "completed": q.completed_count,
-                "failed": q.failed_count,
-            })
+    def extra_state_attributes(self) -> dict[str, Any]:
+        queues = self._coordinator.queues
         return {
-            "total_queues": len(self._coordinator.queues),
-            "total_pending": total_pending,
-            "total_completed": total_completed,
-            "total_failed": total_failed,
-            "queues": queues_summary,
+            "queue_count": len(queues),
+            "queues": [
+                {
+                    "name": q.name,
+                    "state": q.state,
+                    "pending": q.pending_count,
+                    "priority": q.priority,
+                }
+                for q in self._coordinator.queues_by_priority
+            ],
         }
 
 
-# ---------------------------------------------------------------------------
-# Per-queue sensors
-# ---------------------------------------------------------------------------
-
-
-class _QueueSensorBase(_DeviceInfoMixin, SensorEntity):
-    """Base class for per-queue sensors."""
-
+class QueueStatusSensor(SensorEntity):
     _attr_has_entity_name = True
+    _attr_icon = "mdi:list-status"
 
-    def __init__(
-        self, entry: ConfigEntry, queue: NamedQueue, key: str, name_suffix: str
-    ) -> None:
+    def __init__(self, queue: NamedQueue, entry: ConfigEntry) -> None:
         self._queue = queue
-        self._attr_unique_id = f"{entry.entry_id}_{queue.slug}_{key}"
-        self._attr_name = f"{queue.name} {name_suffix}"
-        self._attr_device_info = self._make_device_info(entry)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_{queue.slug}_status"
+        self._attr_name = "Status"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, f"{entry.entry_id}_{queue.slug}")},
+            "name": f"Update Queue: {queue.name}",
+            "manufacturer": "Smarter Homes LLC",
+            "model": "Update Queue",
+            "sw_version": "2.0.0",
+            "via_device": (DOMAIN, entry.entry_id),
+        }
 
     async def async_added_to_hass(self) -> None:
-        self._queue.register_listener(self._handle_update)
+        self._queue.register_listener(self._on_update)
 
     async def async_will_remove_from_hass(self) -> None:
-        self._queue.remove_listener(self._handle_update)
+        self._queue.remove_listener(self._on_update)
 
     @callback
-    def _handle_update(self) -> None:
+    def _on_update(self) -> None:
         self.async_write_ha_state()
-
-
-class QueueStatusSensor(_QueueSensorBase):
-    """Sensor showing the queue state (idle/running/paused/stopped)."""
-
-    _attr_icon = "mdi:playlist-play"
-
-    def __init__(self, entry: ConfigEntry, queue: NamedQueue) -> None:
-        super().__init__(entry, queue, "status", "Status")
 
     @property
     def native_value(self) -> str:
         return self._queue.state
 
     @property
-    def extra_state_attributes(self) -> dict:
-        return {
-            "enabled": self._queue.enabled,
+    def extra_state_attributes(self) -> dict[str, Any]:
+        attrs: dict[str, Any] = {
             "exec_mode": self._queue.exec_mode,
             "trigger_mode": self._queue.trigger_mode,
-            "pending": self._queue.pending_count,
-            "completed": self._queue.completed_count,
-            "failed": self._queue.failed_count,
-            "last_success": self._queue.last_success,
-            "last_failure": self._queue.last_failure,
-            "current_item": (
-                self._queue.current_item.entity_id
-                if self._queue.current_item
-                else None
-            ),
+            "battery_handling": self._queue.battery_handling,
+            "priority": self._queue.priority,
+            "match_type": self._queue.match_type,
+            "match_value": self._queue.match_value,
+        }
+        if self._queue.current_item:
+            attrs["current_item"] = self._queue.current_item.entity_id
+        return attrs
+
+
+class QueuePendingSensor(SensorEntity):
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:clock-outline"
+
+    def __init__(self, queue: NamedQueue, entry: ConfigEntry) -> None:
+        self._queue = queue
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_{queue.slug}_pending"
+        self._attr_name = "Pending Updates"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, f"{entry.entry_id}_{queue.slug}")},
+            "name": f"Update Queue: {queue.name}",
+            "manufacturer": "Smarter Homes LLC",
+            "model": "Update Queue",
+            "sw_version": "2.0.0",
+            "via_device": (DOMAIN, entry.entry_id),
         }
 
+    async def async_added_to_hass(self) -> None:
+        self._queue.register_listener(self._on_update)
 
-class QueuePendingSensor(_QueueSensorBase):
-    """Sensor showing the pending update count for a queue."""
+    async def async_will_remove_from_hass(self) -> None:
+        self._queue.remove_listener(self._on_update)
 
-    _attr_icon = "mdi:package-down"
-    _attr_native_unit_of_measurement = "updates"
-
-    def __init__(self, entry: ConfigEntry, queue: NamedQueue) -> None:
-        super().__init__(entry, queue, "pending", "Pending")
+    @callback
+    def _on_update(self) -> None:
+        self.async_write_ha_state()
 
     @property
     def native_value(self) -> int:
         return self._queue.pending_count
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "summary": self._queue.pending_summary,
+            "completed": self._queue.completed_count,
+            "failed": self._queue.failed_count,
+        }
 
-class QueueItemsSensor(_QueueSensorBase):
-    """Sensor listing all items in a queue as an attribute."""
 
+class QueueItemsSensor(SensorEntity):
+    _attr_has_entity_name = True
     _attr_icon = "mdi:format-list-bulleted"
 
-    def __init__(self, entry: ConfigEntry, queue: NamedQueue) -> None:
-        super().__init__(entry, queue, "items", "Items")
+    def __init__(self, queue: NamedQueue, entry: ConfigEntry) -> None:
+        self._queue = queue
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_{queue.slug}_items"
+        self._attr_name = "Queue Items"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, f"{entry.entry_id}_{queue.slug}")},
+            "name": f"Update Queue: {queue.name}",
+            "manufacturer": "Smarter Homes LLC",
+            "model": "Update Queue",
+            "sw_version": "2.0.0",
+            "via_device": (DOMAIN, entry.entry_id),
+        }
+
+    async def async_added_to_hass(self) -> None:
+        self._queue.register_listener(self._on_update)
+
+    async def async_will_remove_from_hass(self) -> None:
+        self._queue.remove_listener(self._on_update)
+
+    @callback
+    def _on_update(self) -> None:
+        self.async_write_ha_state()
 
     @property
     def native_value(self) -> int:
         return len(self._queue.items)
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         return {"items": self._queue.items_summary}
+
+
+class QueueLastRunResultSensor(SensorEntity):
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:clipboard-check-outline"
+
+    def __init__(self, queue: NamedQueue, entry: ConfigEntry) -> None:
+        self._queue = queue
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_{queue.slug}_last_run"
+        self._attr_name = "Last Run Result"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, f"{entry.entry_id}_{queue.slug}")},
+            "name": f"Update Queue: {queue.name}",
+            "manufacturer": "Smarter Homes LLC",
+            "model": "Update Queue",
+            "sw_version": "2.0.0",
+            "via_device": (DOMAIN, entry.entry_id),
+        }
+
+    async def async_added_to_hass(self) -> None:
+        self._queue.register_listener(self._on_update)
+
+    async def async_will_remove_from_hass(self) -> None:
+        self._queue.remove_listener(self._on_update)
+
+    @callback
+    def _on_update(self) -> None:
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> str:
+        lrr = self._queue.last_run_result
+        if lrr:
+            return lrr.result
+        return "idle"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        lrr = self._queue.last_run_result
+        if not lrr:
+            return {}
+        return lrr.to_dict()
+
+
+class QueueHistorySensor(SensorEntity):
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:history"
+
+    def __init__(self, queue: NamedQueue, entry: ConfigEntry) -> None:
+        self._queue = queue
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_{queue.slug}_history"
+        self._attr_name = "Update History"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, f"{entry.entry_id}_{queue.slug}")},
+            "name": f"Update Queue: {queue.name}",
+            "manufacturer": "Smarter Homes LLC",
+            "model": "Update Queue",
+            "sw_version": "2.0.0",
+            "via_device": (DOMAIN, entry.entry_id),
+        }
+
+    async def async_added_to_hass(self) -> None:
+        self._queue.register_listener(self._on_update)
+
+    async def async_will_remove_from_hass(self) -> None:
+        self._queue.remove_listener(self._on_update)
+
+    @callback
+    def _on_update(self) -> None:
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> int:
+        return len(self._queue.run_history)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "runs": [r.to_dict() for r in reversed(self._queue.run_history)]
+        }
