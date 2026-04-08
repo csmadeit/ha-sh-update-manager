@@ -15,7 +15,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, TRIGGER_AUTO, TRIGGER_MANUAL
+from .const import DOMAIN, SW_VERSION, TRIGGER_AUTO, TRIGGER_MANUAL
 from .queue_manager import QueueCoordinator, NamedQueue
 
 
@@ -41,8 +41,7 @@ def _hub_device_info(entry: ConfigEntry) -> dict:
         "name": "SH Update Manager",
         "manufacturer": "Smarter Homes LLC",
         "model": "Update Manager Hub",
-        "sw_version": "2.0.0",
-        "entry_type": "service",
+        "sw_version": SW_VERSION,
     }
 
 
@@ -52,7 +51,7 @@ def _queue_device_info(entry: ConfigEntry, queue: NamedQueue) -> dict:
         "name": f"Update Queue: {queue.name}",
         "manufacturer": "Smarter Homes LLC",
         "model": "Update Queue",
-        "sw_version": "2.0.0",
+        "sw_version": SW_VERSION,
         "via_device": (DOMAIN, entry.entry_id),
     }
 

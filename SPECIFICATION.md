@@ -1,4 +1,4 @@
-# SH Auto Update Manager — Specification v2.0.1
+# SH Auto Update Manager — Specification v2.0.2
 
 **by Smarter Homes LLC — smarter.homes**
 
@@ -202,7 +202,7 @@ custom_components/sh_update_manager/
 ├── button.py            # Hub + per-queue buttons
 ├── switch.py            # Hub + per-queue switches
 ├── config_flow.py       # Setup + options flow with queue CRUD
-├── manifest.json        # Integration manifest (v2.0.1)
+├── manifest.json        # Integration manifest (v2.0.2)
 ├── services.yaml        # Service definitions
 ├── strings.json         # UI strings
 ├── translations/

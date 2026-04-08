@@ -16,7 +16,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import DOMAIN, SW_VERSION
 from .queue_manager import QueueCoordinator, NamedQueue
 
 
@@ -53,8 +53,7 @@ class GlobalOverviewSensor(SensorEntity):
             "name": "SH Update Manager",
             "manufacturer": "Smarter Homes LLC",
             "model": "Update Manager Hub",
-            "sw_version": "2.0.0",
-            "entry_type": "service",
+            "sw_version": SW_VERSION,
         }
 
     async def async_added_to_hass(self) -> None:
@@ -109,7 +108,7 @@ class QueueStatusSensor(SensorEntity):
             "name": f"Update Queue: {queue.name}",
             "manufacturer": "Smarter Homes LLC",
             "model": "Update Queue",
-            "sw_version": "2.0.0",
+            "sw_version": SW_VERSION,
             "via_device": (DOMAIN, entry.entry_id),
         }
 
@@ -156,7 +155,7 @@ class QueuePendingSensor(SensorEntity):
             "name": f"Update Queue: {queue.name}",
             "manufacturer": "Smarter Homes LLC",
             "model": "Update Queue",
-            "sw_version": "2.0.0",
+            "sw_version": SW_VERSION,
             "via_device": (DOMAIN, entry.entry_id),
         }
 
@@ -197,7 +196,7 @@ class QueueItemsSensor(SensorEntity):
             "name": f"Update Queue: {queue.name}",
             "manufacturer": "Smarter Homes LLC",
             "model": "Update Queue",
-            "sw_version": "2.0.0",
+            "sw_version": SW_VERSION,
             "via_device": (DOMAIN, entry.entry_id),
         }
 
@@ -234,7 +233,7 @@ class QueueLastRunResultSensor(SensorEntity):
             "name": f"Update Queue: {queue.name}",
             "manufacturer": "Smarter Homes LLC",
             "model": "Update Queue",
-            "sw_version": "2.0.0",
+            "sw_version": SW_VERSION,
             "via_device": (DOMAIN, entry.entry_id),
         }
 
@@ -277,7 +276,7 @@ class QueueHistorySensor(SensorEntity):
             "name": f"Update Queue: {queue.name}",
             "manufacturer": "Smarter Homes LLC",
             "model": "Update Queue",
-            "sw_version": "2.0.0",
+            "sw_version": SW_VERSION,
             "via_device": (DOMAIN, entry.entry_id),
         }
 

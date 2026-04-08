@@ -151,6 +151,7 @@ automation:
 
 | Version | Changes |
 |---------|---------|
+| 2.0.2 | Fix setup failure on production HA: config entry migration handler, robust error handling, Platform enum, remove entry_type from device_info |
 | 2.0.1 | Fix HA 2024.1.0 compatibility: robust panel registration with version fallbacks, remove frontend dependency |
 | 2.0.0 | Complete redesign: device-per-queue, sidebar panel, update history, battery handling, retry failed, priorities |
 | 1.2.2 | Queue selection improvements |

@@ -7,7 +7,7 @@ by Smarter Homes LLC — smarter.homes
 """
 
 DOMAIN = "sh_update_manager"
-SW_VERSION = "2.0.0"
+SW_VERSION = "2.0.2"
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -236,7 +236,7 @@ SERVICE_SCAN_QUEUE = "scan_queue"
 # ---------------------------------------------------------------------------
 # Platforms
 # ---------------------------------------------------------------------------
-PLATFORMS = ["sensor", "button", "switch"]
+# Note: PLATFORMS is defined in __init__.py using Platform enum
 
 # ---------------------------------------------------------------------------
 # Storage
