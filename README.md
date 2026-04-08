@@ -38,11 +38,17 @@ One-click retry for all failed items in a queue. Failed items are re-queued and 
 - **HA Core / HA OS**: Never included in default queues (prevents accidental self-update during other updates)
 
 ### Sidebar Panel
-Dedicated management UI accessible from the HA sidebar:
+Dedicated management UI accessible from the HA sidebar — the **central hub** for all queue management:
+- **Add Queue** button to create new queues with a form dialog
+- **Edit** and **Delete** buttons on each queue card
+- Form dialogs with friendly dropdowns for all settings (match type, exec mode, trigger mode, battery handling, priority)
+- Advanced settings collapsible section (install delay, timeout, retries, history count)
+- Delete confirmation dialog
 - Visual queue overview with real-time status
 - Per-queue controls (scan, start, stop, pause, resume, skip, retry)
 - Queue items with version details and battery indicators
 - Run history browser
+- No need to navigate to Settings — everything is managed from the panel
 
 ### HA Native Scheduling
 No custom scheduler — use HA's built-in automations and schedule helpers to trigger queues on your schedule.
@@ -64,7 +70,7 @@ No custom scheduler — use HA's built-in automations and schedule helpers to tr
 
 1. **Settings → Devices & Services → Add Integration → SH Auto Update Manager**
 2. Select which default queues to create (or deselect all and add your own later)
-3. After setup, use the **gear icon** to add/edit/delete queues with full configuration
+3. Open the **Update Manager** sidebar panel to add/edit/delete queues and manage updates
 
 ## Entities Per Queue
 
@@ -107,6 +113,9 @@ Each queue device has **12 entities**:
 | `sh_update_manager.clear_queue` | Clear all items from a queue |
 | `sh_update_manager.retry_failed` | Retry all failed items in a queue |
 | `sh_update_manager.scan_queue` | Scan a single queue |
+| `sh_update_manager.add_queue` | Create a new queue |
+| `sh_update_manager.edit_queue` | Edit an existing queue |
+| `sh_update_manager.delete_queue` | Delete a queue |
 
 ## Automation Example
 
@@ -151,6 +160,7 @@ automation:
 
 | Version | Changes |
 |---------|---------|
+| 2.0.3 | Queue management UI in sidebar panel: Add/Edit/Delete buttons, form dialogs with dropdowns, backend CRUD services, detailed scan logging |
 | 2.0.2 | Fix setup failure on production HA: config entry migration handler, robust error handling, Platform enum, remove entry_type from device_info |
 | 2.0.1 | Fix HA 2024.1.0 compatibility: robust panel registration with version fallbacks, remove frontend dependency |
 | 2.0.0 | Complete redesign: device-per-queue, sidebar panel, update history, battery handling, retry failed, priorities |

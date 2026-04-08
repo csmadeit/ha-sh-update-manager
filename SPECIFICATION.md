@@ -1,4 +1,4 @@
-# SH Auto Update Manager — Specification v2.0.2
+# SH Auto Update Manager — Specification v2.0.3
 
 **by Smarter Homes LLC — smarter.homes**
 
@@ -16,9 +16,10 @@ SH Auto Update Manager is a Home Assistant custom integration that provides queu
 - Native HA automations can trigger any queue entity
 
 **Layer B: Management UI (Configuration)**
-- Sidebar panel (LitElement/JS) for visual queue management
-- Config flow options for queue CRUD
-- Real-time status display
+- Sidebar panel (LitElement/JS) — central hub for all queue management
+- Add/Edit/Delete queue forms with dropdown selectors directly in the panel
+- Config flow options as fallback for queue CRUD
+- Real-time status display with auto-refresh
 
 ### Storage
 
@@ -132,7 +133,22 @@ priority: int                # queue priority (1-100, lower = first)
 ### scan_queue
 - **Domain**: sh_update_manager
 - **Fields**: `queue_name` (string, required)
-- **Behavior**: Scans a single queue for pending updates without starting it.
+- **Behavior**: Scans a single queue for pending updates without starting it. Logs detailed breakdown of skipped entities (disabled, no-match, not-on, unavailable, battery-excluded).
+
+### add_queue
+- **Domain**: sh_update_manager
+- **Fields**: `queue_name` (required), `match_type`, `match_value`, `exec_mode`, `trigger_mode`, `battery_handling`, `stop_on_failure`, `skip_unavailable`, `install_delay`, `install_timeout`, `max_retries`, `history_count`, `priority`
+- **Behavior**: Creates a new queue with given configuration, persists to config entry, and saves to store.
+
+### edit_queue
+- **Domain**: sh_update_manager
+- **Fields**: `queue_name` (required), `new_name` (optional), plus any config fields to update
+- **Behavior**: Updates the specified queue's configuration. Supports renaming via `new_name`. Persists changes.
+
+### delete_queue
+- **Domain**: sh_update_manager
+- **Fields**: `queue_name` (required)
+- **Behavior**: Removes the queue and persists the change. Queue devices/entities are removed on next reload.
 
 ## Safety Overrides
 
@@ -162,11 +178,16 @@ Battery handling modes:
 - Icon: `mdi:update`
 
 ### Features
+- **Queue Management**: Add, Edit, Delete queues directly from the panel
+- Modal form dialogs with dropdown selectors for match_type, exec_mode, trigger_mode, battery_handling
+- Advanced settings collapsible section (install_delay, install_timeout, max_retries, history_count)
+- Delete confirmation dialog
 - Real-time queue grid with auto-refresh (5-second polling)
 - Per-queue controls (scan, start, stop, pause, resume, skip, retry)
 - Item list with version details and battery badges
 - Run history browser per queue
 - Responsive grid layout
+- Page auto-reloads after Add/Edit/Delete to pick up config changes
 
 ## Config Flow
 
@@ -202,7 +223,7 @@ custom_components/sh_update_manager/
 ├── button.py            # Hub + per-queue buttons
 ├── switch.py            # Hub + per-queue switches
 ├── config_flow.py       # Setup + options flow with queue CRUD
-├── manifest.json        # Integration manifest (v2.0.2)
+├── manifest.json        # Integration manifest (v2.0.3)
 ├── services.yaml        # Service definitions
 ├── strings.json         # UI strings
 ├── translations/
