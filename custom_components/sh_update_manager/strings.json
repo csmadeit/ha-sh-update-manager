@@ -3,8 +3,24 @@
     "step": {
       "user": {
         "title": "SH Auto Update Manager",
-        "description": "Set up the Auto Update Manager by Smarter Homes LLC (smarter.homes).\n\nThis integration creates named update queues (e.g., Z-Wave Firmware, ESPHome Devices) with independent rules, execution modes, and controls.\n\nDefault queues are created automatically. You can add, edit, or remove queues in the integration options after setup.",
-        "data": {}
+        "description": "Set up the Auto Update Manager by Smarter Homes LLC (smarter.homes).\n\nThis integration creates named update queues (e.g., Z-Wave Firmware, ESPHome Devices) with independent rules, execution modes, and controls.\n\nYou can auto-create common queues now, or start from scratch and build your own.",
+        "data": {
+          "auto_create_queues": "Auto-create default queues?"
+        },
+        "data_description": {
+          "auto_create_queues": "If enabled, you will be asked which default queues to create (Z-Wave, ESPHome, HACS, etc.). If disabled, you start with no queues and can add your own later."
+        }
+      },
+      "select_queues": {
+        "title": "Select Default Queues",
+        "description": "Choose which default queues to create. You can always add, edit, or remove queues later in the integration options.",
+        "data": {
+          "queue_0": "Z-Wave Firmware (sequential, mains-powered only)",
+          "queue_1": "ESPHome Devices (sequential)",
+          "queue_2": "HACS Updates (sequential)",
+          "queue_3": "Add-ons (sequential)",
+          "queue_4": "Other Updates — Matter, MQTT (sequential)"
+        }
       }
     },
     "abort": {

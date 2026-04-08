@@ -16,7 +16,7 @@ A HACS custom integration for Home Assistant that manages updates through **name
 ┌─────────────────────────────────────────────────┐
 │           Config Flow / Options                  │
 │  (config_flow.py)                                │
-│  Setup: creates entry with default queues        │
+│  Setup: ask auto-create → select queues           │
 │  Options: list → add/edit/remove queues          │
 └──────────────┬──────────────────────────────────┘
                │
@@ -310,6 +310,11 @@ This ensures all queues survive Home Assistant restarts.
 ---
 
 ## Version History
+
+### v1.2.1 — 2026-04-08
+- Interactive setup flow — asks whether to auto-create default queues
+- Queue selection step with checkboxes for each default queue template
+- Option to start with zero queues and build from scratch
 
 ### v1.2.0 — 2026-04-08
 - Queue-based architecture — multiple named queues replace single global queue
