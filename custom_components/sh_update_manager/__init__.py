@@ -18,10 +18,16 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
-from homeassistant.components.frontend import (
-    async_register_built_in_panel,
-)
-from homeassistant.components.http import StaticPathConfig
+
+try:
+    from homeassistant.components.frontend import async_register_built_in_panel
+except ImportError:
+    async_register_built_in_panel = None  # type: ignore[assignment]
+
+try:
+    from homeassistant.components.http import StaticPathConfig
+except ImportError:
+    StaticPathConfig = None  # type: ignore[assignment,misc]
 
 from .const import (
     DOMAIN,
@@ -85,27 +91,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     # Register sidebar panel
-    try:
-        panel_dir = os.path.join(os.path.dirname(__file__), "frontend")
-        await hass.http.async_register_static_paths([
-            StaticPathConfig(URL_BASE, panel_dir, cache_headers=False)
-        ])
-        async_register_built_in_panel(
-            hass,
-            component_name="custom",
-            sidebar_title=PANEL_TITLE,
-            sidebar_icon=PANEL_ICON,
-            frontend_url_path=PANEL_URL,
-            config={
-                "_panel_custom": {
-                    "name": "sh-update-manager-panel",
-                    "module_url": f"{URL_BASE}/panel.js",
-                }
-            },
-            require_admin=False,
-        )
-    except Exception:
-        _LOGGER.warning("Could not register sidebar panel — frontend may not be available")
+    await _register_panel(hass)
 
     # Register services
     async def handle_scan_all(call: ServiceCall) -> None:
@@ -171,6 +157,52 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
+
+
+async def _register_panel(hass: HomeAssistant) -> None:
+    """Register the sidebar panel with robust fallbacks for different HA versions."""
+    if DOMAIN in hass.data.get("panels_registered", set()):
+        return  # Already registered
+
+    panel_dir = os.path.join(os.path.dirname(__file__), "frontend")
+
+    try:
+        # Register static path — try new API first (HA 2024.7+), then old API
+        if StaticPathConfig is not None:
+            await hass.http.async_register_static_paths([
+                StaticPathConfig(URL_BASE, panel_dir, cache_headers=False)
+            ])
+        elif hasattr(hass.http, "register_static_path"):
+            hass.http.register_static_path(URL_BASE, panel_dir, cache_headers=False)
+        else:
+            _LOGGER.warning("Cannot register static path — unknown HA version")
+            return
+
+        # Register panel
+        if async_register_built_in_panel is not None:
+            async_register_built_in_panel(
+                hass,
+                component_name="custom",
+                sidebar_title=PANEL_TITLE,
+                sidebar_icon=PANEL_ICON,
+                frontend_url_path=PANEL_URL,
+                config={
+                    "_panel_custom": {
+                        "name": "sh-update-manager-panel",
+                        "module_url": f"{URL_BASE}/panel.js",
+                    }
+                },
+                require_admin=False,
+            )
+        else:
+            _LOGGER.warning("async_register_built_in_panel not available")
+            return
+
+        hass.data.setdefault("panels_registered", set())
+        hass.data["panels_registered"].add(DOMAIN)
+        _LOGGER.info("SH Update Manager sidebar panel registered at /%s", PANEL_URL)
+    except Exception:
+        _LOGGER.exception("Could not register sidebar panel")
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
