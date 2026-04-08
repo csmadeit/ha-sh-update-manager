@@ -4,7 +4,7 @@ by **Smarter Homes LLC** — [smarter.homes](https://smarter.homes)
 
 A HACS-compatible custom integration that creates **named update queues** (e.g., "Z-Wave Firmware", "ESPHome Devices", "HACS Updates") with **independent rules**, **execution modes**, and **per-queue controls** for managing Home Assistant updates.
 
-**Status:** v1.2.1 — Queue-based architecture with interactive setup flow.
+**Status:** v1.2.2 — Queue-based architecture with queue selection setup.
 
 ---
 
@@ -29,10 +29,11 @@ Home Assistant exposes firmware and software updates as `update.*` entities. Whe
 
 ---
 
-## What's New in v1.2.1
+## What's New in v1.2.2
 
-- **Interactive setup flow** — setup now asks whether to auto-create default queues, then lets you select which ones via checkboxes
-- You can choose to start with no queues and build your own from scratch
+- **Queue selection setup** — setup goes straight to queue selection with named checkboxes showing queue name, execution mode, and trigger info
+- Each checkbox has a description showing which integrations it matches
+- Uncheck all to start empty and build your own custom queues
 
 ## What's New in v1.2.0
 
@@ -294,9 +295,13 @@ This integration follows the **SH (Smarter Homes)** HACS branding standard:
 
 ## Audit Log
 
+### v1.2.2 — 2026-04-08
+- Setup goes straight to queue selection with proper names and descriptions
+- Each queue checkbox shows: name, execution mode, trigger mode, matched integrations
+- Removed unnecessary auto-create toggle
+
 ### v1.2.1 — 2026-04-08
-- Interactive setup flow — asks whether to auto-create default queues
-- Queue selection step with checkboxes for each default queue template
+- Interactive setup flow with queue selection checkboxes
 - Option to start with zero queues and build from scratch
 
 ### v1.2.0 — 2026-04-08

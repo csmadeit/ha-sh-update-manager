@@ -311,9 +311,12 @@ This ensures all queues survive Home Assistant restarts.
 
 ## Version History
 
+### v1.2.2 — 2026-04-08
+- Setup goes straight to queue selection with proper names and descriptions
+- Removed unnecessary auto-create toggle
+
 ### v1.2.1 — 2026-04-08
-- Interactive setup flow — asks whether to auto-create default queues
-- Queue selection step with checkboxes for each default queue template
+- Interactive setup flow with queue selection checkboxes
 - Option to start with zero queues and build from scratch
 
 ### v1.2.0 — 2026-04-08

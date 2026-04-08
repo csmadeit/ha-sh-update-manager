@@ -2,24 +2,21 @@
   "config": {
     "step": {
       "user": {
-        "title": "SH Auto Update Manager",
-        "description": "Set up the Auto Update Manager by Smarter Homes LLC (smarter.homes).\n\nThis integration creates named update queues (e.g., Z-Wave Firmware, ESPHome Devices) with independent rules, execution modes, and controls.\n\nYou can auto-create common queues now, or start from scratch and build your own.",
+        "title": "SH Auto Update Manager — Setup",
+        "description": "Select which update queues to create. Each queue manages a group of updates independently.\n\nYou can add, edit, or remove queues later in the integration options.\n\nUncheck all to start empty and create your own custom queues.",
         "data": {
-          "auto_create_queues": "Auto-create default queues?"
+          "queue_0": "Z-Wave Firmware — sequential, mains-powered only, manual trigger",
+          "queue_1": "ESPHome Devices — sequential, manual trigger",
+          "queue_2": "HACS Updates — sequential, manual trigger",
+          "queue_3": "Add-ons — sequential, manual trigger",
+          "queue_4": "Other Updates (Matter, MQTT) — sequential, manual trigger"
         },
         "data_description": {
-          "auto_create_queues": "If enabled, you will be asked which default queues to create (Z-Wave, ESPHome, HACS, etc.). If disabled, you start with no queues and can add your own later."
-        }
-      },
-      "select_queues": {
-        "title": "Select Default Queues",
-        "description": "Choose which default queues to create. You can always add, edit, or remove queues later in the integration options.",
-        "data": {
-          "queue_0": "Z-Wave Firmware (sequential, mains-powered only)",
-          "queue_1": "ESPHome Devices (sequential)",
-          "queue_2": "HACS Updates (sequential)",
-          "queue_3": "Add-ons (sequential)",
-          "queue_4": "Other Updates — Matter, MQTT (sequential)"
+          "queue_0": "Matches: zwave_js, zwave integrations. Installs one at a time. Skips battery devices.",
+          "queue_1": "Matches: esphome integration. Installs one at a time.",
+          "queue_2": "Matches: hacs integration. Installs one at a time.",
+          "queue_3": "Matches: hassio_addons, hassio integrations. Installs one at a time.",
+          "queue_4": "Matches: matter, mqtt integrations. Installs one at a time."
         }
       }
     },

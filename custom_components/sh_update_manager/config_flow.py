@@ -1,10 +1,10 @@
-"""Config flow for SH Auto Update Manager v1.2.1.
+"""Config flow for SH Auto Update Manager v1.2.2.
 
 Queue-based architecture: users create named queues with independent
 match rules, execution modes, and trigger settings.
 
-Setup flow asks whether to auto-create default queues and lets users
-select which ones they want.
+Setup flow goes straight to queue selection — user picks which
+queues to create from a list of common templates.
 
 by Smarter Homes LLC — smarter.homes
 """
@@ -51,15 +51,11 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
-# Keys for the default queue checkboxes in the select_queues step
-_DEFAULT_QUEUE_KEYS = [f"queue_{i}" for i in range(len(DEFAULT_QUEUES))]
-
-
 class SHUpdateManagerConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle the initial config flow.
 
-    Step 1 (user):           Welcome + ask whether to auto-create queues.
-    Step 2 (select_queues):  If yes, show checkboxes for each default queue.
+    Single step (user): shows checkboxes for each default queue template.
+    User selects which ones to create. Uncheck all to start empty.
     """
 
     VERSION = 3
@@ -67,39 +63,15 @@ class SHUpdateManagerConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Step 1: Welcome screen — ask whether to create default queues."""
+        """Setup: select which queues to create."""
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
 
         if user_input is not None:
-            if user_input.get("auto_create_queues", True):
-                return await self.async_step_select_queues()
-            # Skip auto-create — start with zero queues
-            return self.async_create_entry(
-                title="SH Auto Update Manager",
-                data={},
-                options={CONF_QUEUES: []},
-            )
-
-        return self.async_show_form(
-            step_id="user",
-            data_schema=vol.Schema(
-                {
-                    vol.Required("auto_create_queues", default=True): bool,
-                }
-            ),
-            description_placeholders={"name": "SH Auto Update Manager"},
-        )
-
-    async def async_step_select_queues(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Step 2: Let user select which default queues to create."""
-        if user_input is not None:
             selected: list[dict] = []
             for i, qdef in enumerate(DEFAULT_QUEUES):
                 key = f"queue_{i}"
-                if user_input.get(key, True):
+                if user_input.get(key, False):
                     selected.append(copy.deepcopy(qdef))
             return self.async_create_entry(
                 title="SH Auto Update Manager",
@@ -107,15 +79,16 @@ class SHUpdateManagerConfigFlow(ConfigFlow, domain=DOMAIN):
                 options={CONF_QUEUES: selected},
             )
 
-        # Build a checkbox per default queue
+        # Build a checkbox per default queue template
         schema_fields: dict[Any, Any] = {}
         for i, qdef in enumerate(DEFAULT_QUEUES):
             key = f"queue_{i}"
             schema_fields[vol.Optional(key, default=True)] = bool
 
         return self.async_show_form(
-            step_id="select_queues",
+            step_id="user",
             data_schema=vol.Schema(schema_fields),
+            description_placeholders={"name": "SH Auto Update Manager"},
         )
 
     @staticmethod
