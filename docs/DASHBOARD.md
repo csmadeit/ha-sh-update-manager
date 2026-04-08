@@ -1,4 +1,4 @@
-# SH Auto Update Manager — Dashboard Setup
+# Smarter.Homes Update Manager — Dashboard Setup
 
 Since this integration doesn't have its own sidebar page (yet), here's how to
 create a dedicated **Update Manager** dashboard view using standard HA cards.
@@ -107,7 +107,7 @@ If you don't want a separate dashboard, add these cards to any existing view:
 type: vertical-stack
 cards:
   - type: entities
-    title: "SH Update Manager"
+    title: "Smarter.Homes Update Manager"
     show_header_toggle: false
     entities:
       - entity: sensor.sh_auto_update_manager_queue_status
@@ -150,7 +150,7 @@ content: >-
 ### First Time Setup
 
 1. **Configure per-group rules first:**
-   - Settings → Devices & Services → SH Auto Update Manager → **Configure**
+   - Settings → Devices & Services → Smarter.Homes Update Manager → **Configure**
    - Step 1: Global settings (leave auto-start OFF if you want manual control)
    - Step 2: Set each group's mode:
      - **Z-Wave:** `sequential` (always one-at-a-time, safe for firmware)

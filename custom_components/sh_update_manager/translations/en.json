@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "SH Auto Update Manager",
+        "title": "Smarter.Homes Update Manager",
         "description": "Select which default queues to create. You can add more later in options.\n{queue_info}",
         "data": {
           "queue_0": "Z-Wave Firmware (sequential, manual, mains-powered)",

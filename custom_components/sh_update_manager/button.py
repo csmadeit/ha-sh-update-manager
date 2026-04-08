@@ -1,4 +1,4 @@
-"""Button entities for SH Auto Update Manager v2.0.0.
+"""Button entities for Smarter.Homes Update Manager v2.0.0.
 
 Hub device: 3 buttons (scan_all, start_all, stop_all)
 Per-queue device: 5 buttons (scan, start, stop, skip_current, retry_failed)
@@ -41,7 +41,7 @@ async def async_setup_entry(
 def _hub_device_info(entry: ConfigEntry) -> dict:
     return {
         "identifiers": {(DOMAIN, entry.entry_id)},
-        "name": "SH Update Manager",
+        "name": "Smarter.Homes Update Manager",
         "manufacturer": "Smarter Homes LLC",
         "model": "Update Manager Hub",
         "sw_version": SW_VERSION,

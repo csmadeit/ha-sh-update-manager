@@ -1,4 +1,4 @@
-"""Config flow for SH Auto Update Manager v2.0.0.
+"""Config flow for Smarter.Homes Update Manager v2.0.0.
 
 Setup: queue selection with proper names and descriptions.
 Options: full queue CRUD — add/edit/delete with battery options, priority.
@@ -65,7 +65,7 @@ class SHUpdateManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if not selected:
                 selected = [copy.deepcopy(DEFAULT_QUEUES[0])]
             return self.async_create_entry(
-                title="SH Auto Update Manager",
+                title="Smarter.Homes Update Manager",
                 data={CONF_QUEUES: selected},
             )
 
@@ -114,7 +114,7 @@ class SHUpdateManagerOptionsFlow(config_entries.OptionsFlow):
                 return await self.async_step_init()
             # done
             return self.async_create_entry(
-                title="SH Auto Update Manager",
+                title="Smarter.Homes Update Manager",
                 data={CONF_QUEUES: self._queues},
             )
 

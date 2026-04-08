@@ -105,7 +105,7 @@ add_queue:
         text:
     match_type:
       name: Match Type
-      description: How to match update entities (integration, area, label, entity).
+      description: How to match update entities.
       required: false
       default: "integration"
       selector:
@@ -115,9 +115,23 @@ add_queue:
             - "area"
             - "label"
             - "entity"
+            - "device_name"
+            - "manufacturer"
     match_value:
       name: Match Values
-      description: Comma-separated values to match (e.g. "zwave_js,zwave").
+      description: >-
+        Comma-separated values to match. For integration: platform names (zwave_js,esphome).
+        For device_name: partial device/model name (Zooz,ZEN71). For manufacturer: exact manufacturer name.
+      required: false
+      default: ""
+      selector:
+        text:
+    exclude_pattern:
+      name: Exclude Pattern
+      description: >-
+        Comma-separated patterns to EXCLUDE from this queue. Matched case-insensitively
+        against device name, manufacturer, model, entity ID, and friendly name.
+        Example: "ZEN32,Inovelli" to exclude all ZEN32 and Inovelli devices.
       required: false
       default: ""
       selector:
@@ -162,6 +176,56 @@ add_queue:
         number:
           min: 1
           max: 100
+    stop_on_failure:
+      name: Stop on Failure
+      description: Stop the queue if an update fails.
+      required: false
+      default: false
+      selector:
+        boolean:
+    skip_unavailable:
+      name: Skip Unavailable
+      description: Skip entities that are unavailable.
+      required: false
+      default: true
+      selector:
+        boolean:
+    install_delay:
+      name: Install Delay
+      description: Seconds to wait between installs (0-300).
+      required: false
+      default: 15
+      selector:
+        number:
+          min: 0
+          max: 300
+    install_timeout:
+      name: Install Timeout
+      description: Seconds to wait for a single install (60-14400).
+      required: false
+      default: 7200
+      selector:
+        number:
+          min: 60
+          max: 14400
+    max_retries:
+      name: Max Retries
+      description: Number of retry attempts for failed installs (0-10).
+      required: false
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 10
+    history_count:
+      name: History Count
+      description: Number of past runs to keep per queue (1-100).
+      required: false
+      default: 25
+      selector:
+        number:
+          min: 1
+          max: 100
 
 edit_queue:
   name: Edit Queue
@@ -190,9 +254,17 @@ edit_queue:
             - "area"
             - "label"
             - "entity"
+            - "device_name"
+            - "manufacturer"
     match_value:
       name: Match Values
       description: Comma-separated values to match.
+      required: false
+      selector:
+        text:
+    exclude_pattern:
+      name: Exclude Pattern
+      description: Comma-separated patterns to exclude (matched against device name, manufacturer, model, entity ID).
       required: false
       selector:
         text:
@@ -223,6 +295,44 @@ edit_queue:
             - "include"
     priority:
       name: Priority
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 100
+    stop_on_failure:
+      name: Stop on Failure
+      required: false
+      selector:
+        boolean:
+    skip_unavailable:
+      name: Skip Unavailable
+      required: false
+      selector:
+        boolean:
+    install_delay:
+      name: Install Delay
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 300
+    install_timeout:
+      name: Install Timeout
+      required: false
+      selector:
+        number:
+          min: 60
+          max: 14400
+    max_retries:
+      name: Max Retries
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 10
+    history_count:
+      name: History Count
       required: false
       selector:
         number:

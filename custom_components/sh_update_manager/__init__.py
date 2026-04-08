@@ -1,4 +1,4 @@
-"""SH Auto Update Manager v2.0.2 — integration setup.
+"""Smarter.Homes Update Manager v2.0.3 — integration setup.
 
 Device-per-queue architecture: each queue registers as a separate HA device.
 A hub device provides global overview and controls.
@@ -77,7 +77,7 @@ QUEUE_SERVICE_SCHEMA = vol.Schema({
 def _hub_device_info(entry: ConfigEntry) -> dict[str, Any]:
     return {
         "identifiers": {(DOMAIN, entry.entry_id)},
-        "name": "SH Update Manager",
+        "name": "Smarter.Homes Update Manager",
         "manufacturer": "Smarter Homes LLC",
         "model": "Update Manager Hub",
         "sw_version": SW_VERSION,
@@ -98,7 +98,7 @@ def queue_device_info(entry: ConfigEntry, queue_slug: str, queue_name: str) -> d
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Migrate old config entries to current version."""
     _LOGGER.info(
-        "Migrating SH Update Manager config entry from version %s.%s to 4",
+        "Migrating Smarter.Homes Update Manager config entry from version %s.%s to 4",
         config_entry.version,
         config_entry.minor_version,
     )
@@ -122,8 +122,8 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up SH Auto Update Manager from a config entry."""
-    _LOGGER.debug("Setting up SH Update Manager entry %s", entry.entry_id)
+    """Set up Smarter.Homes Update Manager from a config entry."""
+    _LOGGER.debug("Setting up Smarter.Homes Update Manager entry %s", entry.entry_id)
 
     # --- 1. Load queue configuration ---
     try:
@@ -180,7 +180,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     _LOGGER.info(
-        "SH Update Manager v%s set up successfully with %d queue(s)",
+        "Smarter.Homes Update Manager v%s set up successfully with %d queue(s)",
         SW_VERSION,
         len(queues_config),
     )
@@ -269,6 +269,7 @@ def _register_services(hass: HomeAssistant, coordinator: QueueCoordinator) -> No
             "max_retries": call.data.get("max_retries", DEFAULT_MAX_RETRIES),
             "history_count": call.data.get("history_count", DEFAULT_HISTORY_COUNT),
             "priority": call.data.get("priority", DEFAULT_PRIORITY),
+            "exclude_pattern": call.data.get("exclude_pattern", ""),
         }
         coordinator.add_queue(new_config)
         # Persist to config entry so it survives restarts
@@ -283,7 +284,8 @@ def _register_services(hass: HomeAssistant, coordinator: QueueCoordinator) -> No
         for key in ("new_name", "match_type", "match_value", "exec_mode",
                      "trigger_mode", "battery_handling", "stop_on_failure",
                      "skip_unavailable", "install_delay", "install_timeout",
-                     "max_retries", "history_count", "priority"):
+                     "max_retries", "history_count", "priority",
+                     "exclude_pattern"):
             if key in call.data:
                 # Map new_name -> name for the config dict
                 config_key = "name" if key == "new_name" else key
@@ -321,6 +323,7 @@ def _register_services(hass: HomeAssistant, coordinator: QueueCoordinator) -> No
             vol.Coerce(int), vol.Range(min=1, max=100)),
         vol.Optional("priority", default=DEFAULT_PRIORITY): vol.All(
             vol.Coerce(int), vol.Range(min=1, max=100)),
+        vol.Optional("exclude_pattern", default=""): cv.string,
     })
 
     EDIT_QUEUE_SCHEMA = vol.Schema({
@@ -338,6 +341,7 @@ def _register_services(hass: HomeAssistant, coordinator: QueueCoordinator) -> No
         vol.Optional("max_retries"): vol.All(vol.Coerce(int), vol.Range(min=0, max=10)),
         vol.Optional("history_count"): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
         vol.Optional("priority"): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+        vol.Optional("exclude_pattern"): cv.string,
     })
 
     hass.services.async_register(DOMAIN, SERVICE_SCAN_ALL, handle_scan_all)
@@ -404,7 +408,7 @@ async def _register_panel(hass: HomeAssistant) -> None:
 
         hass.data.setdefault("panels_registered", set())
         hass.data["panels_registered"].add(DOMAIN)
-        _LOGGER.info("SH Update Manager sidebar panel registered at /%s", PANEL_URL)
+        _LOGGER.info("Smarter.Homes Update Manager sidebar panel registered at /%s", PANEL_URL)
     except Exception:
         _LOGGER.exception("Could not register sidebar panel")
 

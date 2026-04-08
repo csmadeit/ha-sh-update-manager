@@ -1,10 +1,10 @@
-# SH Auto Update Manager — Specification v2.0.3
+# Smarter.Homes Update Manager — Specification v2.0.3
 
 **by Smarter Homes LLC — smarter.homes**
 
 ## Overview
 
-SH Auto Update Manager is a Home Assistant custom integration that provides queue-based management of HA update entities. Each queue registers as a separate HA device, enabling clean separation of concerns and native automation support.
+Smarter.Homes Update Manager is a Home Assistant custom integration that provides queue-based management of HA update entities. Each queue registers as a separate HA device, enabling clean separation of concerns and native automation support.
 
 ## Architecture
 
@@ -78,7 +78,7 @@ priority: int                # queue priority (1-100, lower = first)
 
 ## Entity Specification
 
-### Hub Device: "SH Update Manager"
+### Hub Device: "Smarter.Homes Update Manager"
 | Platform | Entity ID Pattern | Description |
 |----------|-------------------|-------------|
 | sensor | `sensor.sh_update_manager_overview` | Global queue overview |

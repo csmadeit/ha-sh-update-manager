@@ -1,4 +1,4 @@
-"""Constants for SH Auto Update Manager v2.0.0 — Queue-based architecture.
+"""Constants for Smarter.Homes Update Manager v2.0.0 — Queue-based architecture.
 
 Device-per-queue design: each queue is a separate HA device with its own
 sensors, buttons, and switches. A hub device provides global controls.
@@ -58,8 +58,13 @@ MATCH_INTEGRATION = "integration"
 MATCH_AREA = "area"
 MATCH_LABEL = "label"
 MATCH_ENTITY = "entity"
+MATCH_DEVICE_NAME = "device_name"
+MATCH_MANUFACTURER = "manufacturer"
 
-MATCH_TYPES_LIST = [MATCH_INTEGRATION, MATCH_AREA, MATCH_LABEL, MATCH_ENTITY]
+MATCH_TYPES_LIST = [
+    MATCH_INTEGRATION, MATCH_AREA, MATCH_LABEL, MATCH_ENTITY,
+    MATCH_DEVICE_NAME, MATCH_MANUFACTURER,
+]
 
 # ---------------------------------------------------------------------------
 # Update groups — logical groupings by integration type
@@ -219,6 +224,7 @@ CONF_INSTALL_TIMEOUT = "install_timeout"
 CONF_MAX_RETRIES = "max_retries"
 CONF_HISTORY_COUNT = "history_count"
 CONF_PRIORITY = "priority"
+CONF_EXCLUDE_PATTERN = "exclude_pattern"
 
 # ---------------------------------------------------------------------------
 # Services

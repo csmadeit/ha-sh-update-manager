@@ -97,5 +97,5 @@ HACS automatically detects new GitHub releases. Users will see the update in HAC
 3. Add URL: `https://github.com/csmadeit/ha-sh-update-manager`
 4. Category: **Integration**
 5. Click **Add**
-6. Install **SH Auto Update Manager**
+6. Install **Smarter.Homes Update Manager**
 7. Restart Home Assistant

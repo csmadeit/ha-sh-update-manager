@@ -1,5 +1,5 @@
 /**
- * SH Auto Update Manager — Sidebar Panel v2.0.3
+ * Smarter.Homes Update Manager — Sidebar Panel v2.0.3
  * Full queue management UI with Add/Edit/Delete.
  *
  * by Smarter Homes LLC — smarter.homes
@@ -232,6 +232,7 @@ class SHUpdateManagerPanel extends LitElement {
       max_retries: 2,
       history_count: 25,
       priority: 50,
+      exclude_pattern: "",
     };
   }
 
@@ -287,6 +288,7 @@ class SHUpdateManagerPanel extends LitElement {
           priority: attrs.priority || 50,
           match_type: attrs.match_type || "",
           match_value: attrs.match_value || "",
+          exclude_pattern: attrs.exclude_pattern || "",
           pending: pendingSensor ? parseInt(pendingSensor.state) || 0 : 0,
           pending_summary: pendingSensor?.attributes?.summary || "",
           completed: pendingSensor?.attributes?.completed || 0,
@@ -303,7 +305,7 @@ class SHUpdateManagerPanel extends LitElement {
       this._queues = queues;
       this._loading = false;
     } catch (e) {
-      console.error("SH Update Manager: error loading data", e);
+      console.error("Smarter.Homes Update Manager: error loading data", e);
       this._loading = false;
     }
   }
@@ -357,6 +359,7 @@ class SHUpdateManagerPanel extends LitElement {
       max_retries: 2,
       history_count: 25,
       priority: queue.priority || 50,
+      exclude_pattern: queue.exclude_pattern || "",
     };
     this._editingQueue = queue;
     this._showForm = "edit";
@@ -396,6 +399,7 @@ class SHUpdateManagerPanel extends LitElement {
         max_retries: parseInt(fd.max_retries) || 2,
         history_count: parseInt(fd.history_count) || 25,
         priority: parseInt(fd.priority) || 50,
+        exclude_pattern: fd.exclude_pattern || "",
       });
     } else if (this._showForm === "edit" && this._editingQueue) {
       const data = { queue_name: this._editingQueue.name };
@@ -408,6 +412,7 @@ class SHUpdateManagerPanel extends LitElement {
       data.trigger_mode = fd.trigger_mode;
       data.battery_handling = fd.battery_handling;
       data.priority = parseInt(fd.priority) || 50;
+      data.exclude_pattern = fd.exclude_pattern || "";
       await this._callService("edit_queue", data);
     }
     this._closeForm();
@@ -474,7 +479,7 @@ class SHUpdateManagerPanel extends LitElement {
           <dt>Mode</dt><dd>${queue.exec_mode}</dd>
           <dt>Trigger</dt><dd>${queue.trigger_mode}</dd>
           <dt>Battery</dt><dd>${queue.battery_handling}</dd>
-          <dt>Match</dt><dd>${queue.match_type}: ${queue.match_value || "(all)"}</dd>
+          <dt>Match</dt><dd>${queue.match_type}: ${queue.match_value || "(all)"}${queue.exclude_pattern ? html` <span style="color:var(--error-color,#db4437)">excl: ${queue.exclude_pattern}</span>` : ""}</dd>
           <dt>Pending</dt><dd>${queue.pending_summary || queue.pending}</dd>
           <dt>Last Run</dt><dd>${queue.last_run_result}</dd>
         </dl>
@@ -564,6 +569,8 @@ class SHUpdateManagerPanel extends LitElement {
                 <option value="area">Area</option>
                 <option value="label">Label</option>
                 <option value="entity">Entity</option>
+                <option value="device_name">Device Name</option>
+                <option value="manufacturer">Manufacturer</option>
               </select>
               <div class="hint">How to find update entities for this queue</div>
             </div>
@@ -571,9 +578,17 @@ class SHUpdateManagerPanel extends LitElement {
               <label>Match Values</label>
               <input type="text" .value=${fd.match_value}
                 @input=${(e) => this._updateFormField("match_value", e.target.value)}
-                placeholder="e.g. zwave_js,zwave" />
-              <div class="hint">Comma-separated integration names, areas, labels, or entity IDs</div>
+                placeholder=${fd.match_type === "device_name" ? "e.g. Zooz,ZEN71" : fd.match_type === "manufacturer" ? "e.g. Zooz,Inovelli" : "e.g. zwave_js,zwave"} />
+              <div class="hint">${fd.match_type === "device_name" ? "Partial match against device name and model (comma-separated)" : fd.match_type === "manufacturer" ? "Exact manufacturer name (comma-separated)" : "Comma-separated integration names, areas, labels, or entity IDs"}</div>
             </div>
+          </div>
+
+          <div class="form-group">
+            <label>Exclude Pattern (optional)</label>
+            <input type="text" .value=${fd.exclude_pattern}
+              @input=${(e) => this._updateFormField("exclude_pattern", e.target.value)}
+              placeholder="e.g. ZEN32,Inovelli" />
+            <div class="hint">Comma-separated patterns to exclude. Matched against device name, manufacturer, model, and entity ID. Leave empty to include all matched devices.</div>
           </div>
 
           <div class="form-row">
@@ -684,7 +699,7 @@ class SHUpdateManagerPanel extends LitElement {
     }
     return html`
       <div class="header">
-        <h1>SH Update Manager</h1>
+        <h1>Smarter.Homes Update Manager</h1>
         <div class="header-actions">
           <button class="btn btn-add" @click=${() => this._openAddForm()}>+ Add Queue</button>
           <button class="btn btn-primary" @click=${this._scanAll}>Scan All Queues</button>

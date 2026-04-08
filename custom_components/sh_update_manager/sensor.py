@@ -1,4 +1,4 @@
-"""Sensor entities for SH Auto Update Manager v2.0.0.
+"""Sensor entities for Smarter.Homes Update Manager v2.0.0.
 
 Hub device: 1 sensor (overview)
 Per-queue device: 5 sensors (status, pending, items, last_run_result, history)
@@ -50,7 +50,7 @@ class GlobalOverviewSensor(SensorEntity):
         self._attr_name = "Overview"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": "SH Update Manager",
+            "name": "Smarter.Homes Update Manager",
             "manufacturer": "Smarter Homes LLC",
             "model": "Update Manager Hub",
             "sw_version": SW_VERSION,
@@ -135,6 +135,7 @@ class QueueStatusSensor(SensorEntity):
             "priority": self._queue.priority,
             "match_type": self._queue.match_type,
             "match_value": self._queue.match_value,
+            "exclude_pattern": self._queue.exclude_pattern,
         }
         if self._queue.current_item:
             attrs["current_item"] = self._queue.current_item.entity_id

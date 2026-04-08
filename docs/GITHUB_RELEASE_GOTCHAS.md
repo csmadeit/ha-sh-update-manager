@@ -128,7 +128,7 @@ curl -s "https://raw.githubusercontent.com/OWNER/REPO/release/custom_components/
 ## Applies To
 
 All Smarter Homes HACS integrations:
-- `ha-sh-update-manager` (SH Auto Update Manager)
+- `ha-sh-update-manager` (Smarter.Homes Update Manager)
 - `ha-schneider-xw-pro` (Schneider Electric Conext XW Pro)
 - Any future `ha-sh-*` repos
 

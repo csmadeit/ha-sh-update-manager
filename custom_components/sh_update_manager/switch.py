@@ -1,4 +1,4 @@
-"""Switch entities for SH Auto Update Manager v2.0.0.
+"""Switch entities for Smarter.Homes Update Manager v2.0.0.
 
 Hub device: 1 switch (pause_all)
 Per-queue device: 2 switches (pause, auto_trigger)
@@ -38,7 +38,7 @@ async def async_setup_entry(
 def _hub_device_info(entry: ConfigEntry) -> dict:
     return {
         "identifiers": {(DOMAIN, entry.entry_id)},
-        "name": "SH Update Manager",
+        "name": "Smarter.Homes Update Manager",
         "manufacturer": "Smarter Homes LLC",
         "model": "Update Manager Hub",
         "sw_version": SW_VERSION,

@@ -1,4 +1,4 @@
-"""Queue manager for SH Auto Update Manager v2.0.0.
+"""Queue manager for Smarter.Homes Update Manager v2.0.0.
 
 Device-per-queue design with history, battery handling, retry, priority.
 
@@ -36,6 +36,9 @@ from .const import (
     MATCH_AREA,
     MATCH_LABEL,
     MATCH_ENTITY,
+    MATCH_DEVICE_NAME,
+    MATCH_MANUFACTURER,
+    CONF_EXCLUDE_PATTERN,
     BATTERY_EXCLUDE,
     BATTERY_DEFER_TO_END,
     INTEGRATION_GROUP_MAP,
@@ -253,6 +256,10 @@ class NamedQueue:
         return self.config.get(CONF_MAX_RETRIES, DEFAULT_MAX_RETRIES)
 
     @property
+    def exclude_pattern(self) -> str:
+        return self.config.get(CONF_EXCLUDE_PATTERN, "")
+
+    @property
     def history_count(self) -> int:
         return self.config.get(CONF_HISTORY_COUNT, DEFAULT_HISTORY_COUNT)
 
@@ -365,6 +372,51 @@ class NamedQueue:
         if lrr:
             self._last_run_result = RunRecord.from_dict(lrr)
 
+    def _get_device_info(self, entity_entry: er.RegistryEntry) -> tuple[str, str, str]:
+        """Return (device_name, manufacturer, model) for an entity's parent device."""
+        try:
+            from homeassistant.helpers import device_registry as dr
+            dev_reg = dr.async_get(self.hass)
+            if entity_entry.device_id:
+                device = dev_reg.async_get(entity_entry.device_id)
+                if device:
+                    return (
+                        device.name or "",
+                        device.manufacturer or "",
+                        device.model or "",
+                    )
+        except Exception:
+            pass
+        return ("", "", "")
+
+    def _matches_exclude_pattern(self, entity_entry: er.RegistryEntry) -> bool:
+        """Check if entity matches the exclude pattern (case-insensitive).
+
+        Exclude patterns are comma-separated strings matched against:
+        device name, manufacturer, model, entity_id, and friendly_name.
+        """
+        raw = self.exclude_pattern
+        if not raw:
+            return False
+        patterns = [p.strip().lower() for p in raw.split(",") if p.strip()]
+        if not patterns:
+            return False
+        dev_name, manufacturer, model = self._get_device_info(entity_entry)
+        state = self.hass.states.get(entity_entry.entity_id)
+        friendly = (state.attributes.get("friendly_name", "") if state else "").lower()
+        search_fields = [
+            entity_entry.entity_id.lower(),
+            dev_name.lower(),
+            manufacturer.lower(),
+            model.lower(),
+            friendly,
+        ]
+        for pat in patterns:
+            for field in search_fields:
+                if pat in field:
+                    return True
+        return False
+
     def _entity_matches(self, entity_entry: er.RegistryEntry) -> bool:
         targets = {v.strip() for v in self.match_value.split(",") if v.strip()}
         if self.match_type == MATCH_INTEGRATION:
@@ -377,6 +429,13 @@ class NamedQueue:
             return False
         if self.match_type == MATCH_ENTITY:
             return entity_entry.entity_id in targets
+        if self.match_type == MATCH_DEVICE_NAME:
+            dev_name, _, model = self._get_device_info(entity_entry)
+            combined = f"{dev_name} {model}".lower()
+            return any(t.lower() in combined for t in targets)
+        if self.match_type == MATCH_MANUFACTURER:
+            _, manufacturer, _ = self._get_device_info(entity_entry)
+            return manufacturer.lower() in {t.lower() for t in targets}
         return False
 
     def _is_battery_device(self, entity_entry: er.RegistryEntry) -> bool:
@@ -403,6 +462,7 @@ class NamedQueue:
         skipped_no_update = 0
         skipped_disabled = 0
         skipped_no_match = 0
+        skipped_excluded = 0
         skipped_not_on = 0
         skipped_unavailable = 0
         skipped_battery = 0
@@ -415,6 +475,13 @@ class NamedQueue:
                 continue
             if not self._entity_matches(entity_entry):
                 skipped_no_match += 1
+                continue
+            if self._matches_exclude_pattern(entity_entry):
+                skipped_excluded += 1
+                _LOGGER.debug(
+                    "Queue '%s': skip %s (matches exclude pattern '%s')",
+                    self.name, entity_entry.entity_id, self.exclude_pattern,
+                )
                 continue
             state = self.hass.states.get(entity_entry.entity_id)
             if state is None or state.state != STATE_ON:
@@ -470,9 +537,9 @@ class NamedQueue:
         self._notify()
         _LOGGER.info(
             "Queue '%s': %d candidates, %d new, %d total "
-            "(skipped: %d disabled, %d no-match, %d not-on, %d unavail, %d battery)",
+            "(skipped: %d disabled, %d no-match, %d excluded, %d not-on, %d unavail, %d battery)",
             self.name, len(candidates), new_count, len(self._items),
-            skipped_disabled, skipped_no_match, skipped_not_on,
+            skipped_disabled, skipped_no_match, skipped_excluded, skipped_not_on,
             skipped_unavailable, skipped_battery,
         )
         return len(self._items)

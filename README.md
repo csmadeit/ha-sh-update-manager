@@ -1,4 +1,4 @@
-# SH Auto Update Manager
+# Smarter.Homes Update Manager
 
 **by Smarter Homes LLC — [smarter.homes](https://smarter.homes)**
 
@@ -59,7 +59,7 @@ No custom scheduler — use HA's built-in automations and schedule helpers to tr
 1. Open HACS → Integrations → 3-dot menu → Custom repositories
 2. Add: `https://github.com/csmadeit/ha-sh-update-manager`
 3. Category: Integration
-4. Install "SH Auto Update Manager" → Restart HA
+4. Install "Smarter.Homes Update Manager" → Restart HA
 
 ### Manual
 1. Download the latest release from [GitHub Releases](https://github.com/csmadeit/ha-sh-update-manager/releases)
@@ -68,7 +68,7 @@ No custom scheduler — use HA's built-in automations and schedule helpers to tr
 
 ## Setup
 
-1. **Settings → Devices & Services → Add Integration → SH Auto Update Manager**
+1. **Settings → Devices & Services → Add Integration → Smarter.Homes Update Manager**
 2. Select which default queues to create (or deselect all and add your own later)
 3. Open the **Update Manager** sidebar panel to add/edit/delete queues and manage updates
 
