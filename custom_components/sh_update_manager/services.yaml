@@ -1,0 +1,39 @@
+start_queue:
+  name: Start Queue
+  description: Start processing the update queue. Discovers eligible updates and installs them one by one.
+
+pause_queue:
+  name: Pause Queue
+  description: Pause the update queue. The current update will finish but no new updates will start.
+
+resume_queue:
+  name: Resume Queue
+  description: Resume a paused update queue.
+
+stop_queue:
+  name: Stop Queue
+  description: Stop the update queue immediately.
+
+skip_current:
+  name: Skip Current
+  description: Skip the currently installing update and move to the next one.
+
+refresh_candidates:
+  name: Refresh Candidates
+  description: Rescan all update entities and refresh the list of available updates.
+
+install_all_eligible:
+  name: Install All Eligible
+  description: Discover all eligible updates and start installing them one by one.
+
+install_entity:
+  name: Install Entity
+  description: Install a specific update entity immediately.
+  fields:
+    entity_id:
+      name: Entity ID
+      description: The update entity to install (e.g., update.kitchen_light_firmware).
+      required: true
+      selector:
+        entity:
+          domain: update

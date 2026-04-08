@@ -1,0 +1,49 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "SH Auto Update Manager",
+        "description": "Set up the Auto Update Manager by Smarter Homes LLC.\n\nThis integration discovers all available Home Assistant updates (Z-Wave firmware, ESPHome, HACS, etc.) and installs them one at a time with configurable rules and scheduling.",
+        "data": {
+          "auto_update": "Enable auto-update (automatically install updates when discovered)",
+          "mains_powered_only": "Mains-powered devices only (skip battery devices)",
+          "category_filter": "Update category filter"
+        },
+        "data_description": {
+          "auto_update": "When enabled, the integration will automatically start installing discovered updates during the maintenance window.",
+          "mains_powered_only": "When enabled, only mains-powered devices will be updated. Battery-powered Z-Wave devices may stall during updates if asleep.",
+          "category_filter": "Filter updates by category. 'all' includes everything, 'firmware' only includes device firmware updates."
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "SH Auto Update Manager is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "SH Auto Update Manager Settings",
+        "description": "Configure update behavior, queue rules, and maintenance window.",
+        "data": {
+          "auto_update": "Auto-update enabled",
+          "mains_powered_only": "Mains-powered devices only",
+          "one_at_a_time": "Install one at a time (sequential queue)",
+          "category_filter": "Update category filter",
+          "install_delay": "Delay between installs (seconds)",
+          "install_timeout": "Timeout per update (seconds)",
+          "max_retries": "Max retries per update",
+          "stop_on_failure": "Stop queue on first failure",
+          "skip_unavailable": "Skip unavailable/sleeping devices",
+          "maintenance_window_enabled": "Enable maintenance window",
+          "maintenance_window_start": "Maintenance window start (HH:MM)",
+          "maintenance_window_end": "Maintenance window end (HH:MM)",
+          "include_integrations": "Include integrations (comma-separated, empty = all)",
+          "exclude_entities": "Exclude entities (comma-separated entity IDs)",
+          "exclude_areas": "Exclude areas (comma-separated area IDs)",
+          "exclude_labels": "Exclude labels (comma-separated)"
+        }
+      }
+    }
+  }
+}
