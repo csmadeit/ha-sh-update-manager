@@ -1,4 +1,11 @@
-"""Sensor entities for SH Auto Update Manager."""
+"""Sensor entities for SH Auto Update Manager.
+
+Provides queue status, pending count, current target, last success/failure,
+completed/failed counts, waiting-for-approval count, and full queue list
+as a sensor attribute for dashboard display.
+
+by Smarter Homes LLC — smarter.homes
+"""
 
 from __future__ import annotations
 
@@ -14,6 +21,8 @@ from .queue_manager import UpdateQueueManager
 
 _LOGGER = logging.getLogger(__name__)
 
+SW_VERSION = "1.1.0"
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -28,6 +37,7 @@ async def async_setup_entry(
     entities = [
         QueueStatusSensor(entry, queue_manager),
         PendingUpdatesSensor(entry, queue_manager),
+        WaitingApprovalSensor(entry, queue_manager),
         CurrentUpdateSensor(entry, queue_manager),
         LastSuccessSensor(entry, queue_manager),
         LastFailureSensor(entry, queue_manager),
@@ -50,7 +60,6 @@ class SHUpdateManagerSensorBase(SensorEntity):
         key: str,
         name: str,
     ) -> None:
-        """Initialize the sensor."""
         self._queue_manager = queue_manager
         self._attr_unique_id = f"{entry.entry_id}_{key}"
         self._attr_name = name
@@ -59,7 +68,7 @@ class SHUpdateManagerSensorBase(SensorEntity):
             "name": "SH Auto Update Manager",
             "manufacturer": "Smarter Homes LLC",
             "model": "Update Manager",
-            "sw_version": "1.0.0",
+            "sw_version": SW_VERSION,
             "configuration_url": "https://smarter.homes",
         }
 
@@ -78,32 +87,32 @@ class SHUpdateManagerSensorBase(SensorEntity):
 
 
 class QueueStatusSensor(SHUpdateManagerSensorBase):
-    """Sensor showing the current queue status."""
+    """Sensor showing the current queue status with full queue list."""
 
     _attr_icon = "mdi:update"
 
     def __init__(
         self, entry: ConfigEntry, queue_manager: UpdateQueueManager
     ) -> None:
-        """Initialize."""
         super().__init__(entry, queue_manager, "queue_status", "Queue Status")
 
     @property
     def native_value(self) -> str:
-        """Return the queue state."""
         return self._queue_manager.state
 
     @property
     def extra_state_attributes(self) -> dict:
-        """Return extra attributes."""
+        """Return extra attributes including the full queue list."""
         queue = self._queue_manager.queue
         return {
             "total_in_queue": len(queue),
-            "pending": len([i for i in queue if i.status == "pending"]),
+            "pending": self._queue_manager.pending_count,
+            "waiting_approval": self._queue_manager.waiting_approval_count,
             "installing": len([i for i in queue if i.status == "installing"]),
             "completed": len([i for i in queue if i.status == "completed"]),
             "failed": len([i for i in queue if i.status == "failed"]),
             "skipped": len([i for i in queue if i.status == "skipped"]),
+            "queue_items": self._queue_manager.queue_summary,
         }
 
 
@@ -116,13 +125,50 @@ class PendingUpdatesSensor(SHUpdateManagerSensorBase):
     def __init__(
         self, entry: ConfigEntry, queue_manager: UpdateQueueManager
     ) -> None:
-        """Initialize."""
-        super().__init__(entry, queue_manager, "pending_updates", "Pending Updates")
+        super().__init__(
+            entry, queue_manager, "pending_updates", "Pending Updates"
+        )
 
     @property
     def native_value(self) -> int:
-        """Return the pending count."""
         return self._queue_manager.pending_count
+
+
+class WaitingApprovalSensor(SHUpdateManagerSensorBase):
+    """Sensor showing the number of items waiting for manual approval."""
+
+    _attr_icon = "mdi:account-check"
+    _attr_native_unit_of_measurement = "updates"
+
+    def __init__(
+        self, entry: ConfigEntry, queue_manager: UpdateQueueManager
+    ) -> None:
+        super().__init__(
+            entry,
+            queue_manager,
+            "waiting_approval",
+            "Waiting Approval",
+        )
+
+    @property
+    def native_value(self) -> int:
+        return self._queue_manager.waiting_approval_count
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """List items waiting for approval."""
+        return {
+            "items": [
+                {
+                    "entity_id": i.entity_id,
+                    "group": i.group,
+                    "friendly_name": i.friendly_name,
+                    "latest_version": i.latest_version,
+                }
+                for i in self._queue_manager.queue
+                if i.status == "waiting_approval"
+            ]
+        }
 
 
 class CurrentUpdateSensor(SHUpdateManagerSensorBase):
@@ -133,16 +179,27 @@ class CurrentUpdateSensor(SHUpdateManagerSensorBase):
     def __init__(
         self, entry: ConfigEntry, queue_manager: UpdateQueueManager
     ) -> None:
-        """Initialize."""
         super().__init__(
             entry, queue_manager, "current_update", "Current Update Target"
         )
 
     @property
     def native_value(self) -> str | None:
-        """Return the current entity being updated."""
         item = self._queue_manager.current_item
         return item.entity_id if item else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        item = self._queue_manager.current_item
+        if item:
+            return {
+                "group": item.group,
+                "friendly_name": item.friendly_name,
+                "installed_version": item.installed_version,
+                "latest_version": item.latest_version,
+                "retries": item.retries,
+            }
+        return {}
 
 
 class LastSuccessSensor(SHUpdateManagerSensorBase):
@@ -153,12 +210,10 @@ class LastSuccessSensor(SHUpdateManagerSensorBase):
     def __init__(
         self, entry: ConfigEntry, queue_manager: UpdateQueueManager
     ) -> None:
-        """Initialize."""
         super().__init__(entry, queue_manager, "last_success", "Last Success")
 
     @property
     def native_value(self) -> str | None:
-        """Return the last success."""
         return self._queue_manager.last_success
 
 
@@ -170,12 +225,10 @@ class LastFailureSensor(SHUpdateManagerSensorBase):
     def __init__(
         self, entry: ConfigEntry, queue_manager: UpdateQueueManager
     ) -> None:
-        """Initialize."""
         super().__init__(entry, queue_manager, "last_failure", "Last Failure")
 
     @property
     def native_value(self) -> str | None:
-        """Return the last failure."""
         return self._queue_manager.last_failure
 
 
@@ -188,14 +241,12 @@ class CompletedCountSensor(SHUpdateManagerSensorBase):
     def __init__(
         self, entry: ConfigEntry, queue_manager: UpdateQueueManager
     ) -> None:
-        """Initialize."""
         super().__init__(
             entry, queue_manager, "completed_count", "Completed Updates"
         )
 
     @property
     def native_value(self) -> int:
-        """Return the completed count."""
         return self._queue_manager.completed_count
 
 
@@ -208,10 +259,10 @@ class FailedCountSensor(SHUpdateManagerSensorBase):
     def __init__(
         self, entry: ConfigEntry, queue_manager: UpdateQueueManager
     ) -> None:
-        """Initialize."""
-        super().__init__(entry, queue_manager, "failed_count", "Failed Updates")
+        super().__init__(
+            entry, queue_manager, "failed_count", "Failed Updates"
+        )
 
     @property
     def native_value(self) -> int:
-        """Return the failed count."""
         return self._queue_manager.failed_count

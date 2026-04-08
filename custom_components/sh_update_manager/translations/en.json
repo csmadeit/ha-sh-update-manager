@@ -3,17 +3,8 @@
     "step": {
       "user": {
         "title": "SH Auto Update Manager",
-        "description": "Set up the Auto Update Manager by Smarter Homes LLC.\n\nThis integration discovers all available Home Assistant updates (Z-Wave firmware, ESPHome, HACS, etc.) and installs them one at a time with configurable rules and scheduling.",
-        "data": {
-          "auto_update": "Enable auto-update (automatically install updates when discovered)",
-          "mains_powered_only": "Mains-powered devices only (skip battery devices)",
-          "category_filter": "Update category filter"
-        },
-        "data_description": {
-          "auto_update": "When enabled, the integration will automatically start installing discovered updates during the maintenance window.",
-          "mains_powered_only": "When enabled, only mains-powered devices will be updated. Battery-powered Z-Wave devices may stall during updates if asleep.",
-          "category_filter": "Filter updates by category. 'all' includes everything, 'firmware' only includes device firmware updates."
-        }
+        "description": "Set up the Auto Update Manager by Smarter Homes LLC (smarter.homes).\n\nThis integration discovers all available Home Assistant updates, groups them by integration type, and installs them with per-group execution modes, manual approval, and safety overrides.\n\nAfter setup, configure per-group rules in the integration options.",
+        "data": {}
       }
     },
     "abort": {
@@ -23,13 +14,11 @@
   "options": {
     "step": {
       "init": {
-        "title": "SH Auto Update Manager Settings",
-        "description": "Configure update behavior, queue rules, and maintenance window.",
+        "title": "Global Settings",
+        "description": "Configure general queue behavior, timing, and maintenance window.",
         "data": {
-          "auto_update": "Auto-update enabled",
-          "mains_powered_only": "Mains-powered devices only",
-          "one_at_a_time": "Install one at a time (sequential queue)",
-          "category_filter": "Update category filter",
+          "auto_start": "Auto-start queue when updates are discovered",
+          "zwave_mains_only": "Z-Wave: mains-powered devices only (skip battery devices)",
           "install_delay": "Delay between installs (seconds)",
           "install_timeout": "Timeout per update (seconds)",
           "max_retries": "Max retries per update",
@@ -37,11 +26,44 @@
           "skip_unavailable": "Skip unavailable/sleeping devices",
           "maintenance_window_enabled": "Enable maintenance window",
           "maintenance_window_start": "Maintenance window start (HH:MM)",
-          "maintenance_window_end": "Maintenance window end (HH:MM)",
-          "include_integrations": "Include integrations (comma-separated, empty = all)",
+          "maintenance_window_end": "Maintenance window end (HH:MM)"
+        },
+        "data_description": {
+          "auto_start": "When enabled, the queue automatically starts processing when new updates are found during a refresh scan. When disabled, you must manually press 'Update All Eligible' to start.",
+          "zwave_mains_only": "Skip battery-powered Z-Wave devices. Battery devices may stall during firmware updates if asleep.",
+          "install_delay": "Wait time between consecutive installs (0-300 seconds).",
+          "install_timeout": "Maximum time to wait for a single update to complete (60-14400 seconds).",
+          "maintenance_window_start": "Updates will only run between start and end times (24h format, e.g. 02:00).",
+          "maintenance_window_end": "Updates will only run between start and end times (24h format, e.g. 05:00)."
+        }
+      },
+      "group_modes": {
+        "title": "Per-Group Execution Modes",
+        "description": "Choose how updates in each group are processed.\n\n- **sequential**: one at a time, wait for each to finish\n- **parallel**: all at once (safe for independent updates)\n- **disabled**: skip entirely, never auto-update\n- **manual_only**: show in queue but require explicit approval\n\nNote: Z-Wave and HA Core/OS are always forced sequential for safety, even if set to parallel.",
+        "data": {
+          "mode_zwave": "Z-Wave Firmware",
+          "mode_esphome": "ESPHome Devices",
+          "mode_hacs": "HACS Integrations",
+          "mode_ha_core": "Home Assistant Core",
+          "mode_ha_os": "Home Assistant OS",
+          "mode_addons": "Add-ons",
+          "mode_matter": "Matter Devices",
+          "mode_mqtt": "MQTT Devices",
+          "mode_other": "Other Updates"
+        }
+      },
+      "filters": {
+        "title": "Exclusion Filters",
+        "description": "Exclude specific entities, areas, or labels from the update queue.",
+        "data": {
           "exclude_entities": "Exclude entities (comma-separated entity IDs)",
           "exclude_areas": "Exclude areas (comma-separated area IDs)",
           "exclude_labels": "Exclude labels (comma-separated)"
+        },
+        "data_description": {
+          "exclude_entities": "Comma-separated list of update entity IDs to always skip (e.g., update.my_device_firmware).",
+          "exclude_areas": "Comma-separated list of area IDs to exclude.",
+          "exclude_labels": "Comma-separated list of labels to exclude."
         }
       }
     }

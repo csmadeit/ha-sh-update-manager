@@ -1,10 +1,15 @@
 start_queue:
   name: Start Queue
-  description: Start processing the update queue. Discovers eligible updates and installs them one by one.
+  description: >-
+    Start processing the update queue. Discovers eligible updates, groups them
+    by integration type, and installs them according to per-group execution
+    modes (sequential, parallel, or manual-only).
 
 pause_queue:
   name: Pause Queue
-  description: Pause the update queue. The current update will finish but no new updates will start.
+  description: >-
+    Pause the update queue. The current update will finish but no new updates
+    will start until resumed.
 
 resume_queue:
   name: Resume Queue
@@ -12,7 +17,7 @@ resume_queue:
 
 stop_queue:
   name: Stop Queue
-  description: Stop the update queue immediately.
+  description: Stop the update queue immediately and cancel processing.
 
 skip_current:
   name: Skip Current
@@ -20,15 +25,19 @@ skip_current:
 
 refresh_candidates:
   name: Refresh Candidates
-  description: Rescan all update entities and refresh the list of available updates.
+  description: >-
+    Rescan all update entities, classify them into groups, and refresh the
+    queue with newly available updates.
 
 install_all_eligible:
   name: Install All Eligible
-  description: Discover all eligible updates and start installing them one by one.
+  description: >-
+    Discover all eligible updates and start installing them according to
+    per-group execution modes.
 
 install_entity:
   name: Install Entity
-  description: Install a specific update entity immediately.
+  description: Install a specific update entity immediately (bypasses queue).
   fields:
     entity_id:
       name: Entity ID
@@ -37,3 +46,23 @@ install_entity:
       selector:
         entity:
           domain: update
+
+approve_item:
+  name: Approve Item
+  description: >-
+    Approve a manual-only update item so it will be installed when the queue
+    runs. Items in manual_only groups require explicit approval before
+    installation.
+  fields:
+    entity_id:
+      name: Entity ID
+      description: The update entity to approve for installation.
+      required: true
+      selector:
+        entity:
+          domain: update
+
+clear_queue:
+  name: Clear Queue
+  description: >-
+    Clear all items from the queue and reset completed/failed counters.

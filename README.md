@@ -2,9 +2,9 @@
 
 by **Smarter Homes LLC** — [smarter.homes](https://smarter.homes)
 
-A HACS-compatible custom integration that discovers all available Home Assistant updates (Z-Wave firmware, ESPHome, HACS, add-ons, etc.) and installs them **one at a time** with configurable rules, scheduling, and queue management.
+A HACS-compatible custom integration that discovers all available Home Assistant updates (Z-Wave firmware, ESPHome, HACS, add-ons, etc.), groups them by integration type, and installs them with **per-group execution modes**, **manual approval workflows**, and **safety overrides** for Z-Wave and HA Core/OS.
 
-**Status:** v1.0.0 — Initial release. Ready for testing.
+**Status:** v1.1.0 — Major upgrade with per-group execution modes and manual queue review.
 
 ---
 
@@ -21,44 +21,85 @@ A HACS-compatible custom integration that discovers all available Home Assistant
 Home Assistant exposes firmware and software updates as `update.*` entities. When you have dozens of Z-Wave devices, ESPHome nodes, or HACS integrations with pending updates, you have to manually click "Install" on each one. This integration solves that by:
 
 1. **Discovering** all `update.*` entities with available updates
-2. **Filtering** them by your rules (integration, area, labels, device type)
-3. **Queuing** them for sequential installation
-4. **Installing** them one at a time, waiting for each to finish
-5. **Handling** timeouts, retries, and failures gracefully
-6. **Respecting** a maintenance window so updates run at safe times
+2. **Grouping** them by integration type (Z-Wave, ESPHome, HACS, HA Core, HA OS, Add-ons, Matter, MQTT, Other)
+3. **Applying per-group rules** — sequential, parallel, disabled, or manual-only
+4. **Safety overrides** — Z-Wave is ALWAYS sequential; HA Core/OS is ALWAYS sequential
+5. **Manual approval** — review the full queue before starting, approve items individually
+6. **Installing** them according to group rules with proper tracking
+7. **Handling** timeouts, retries, and failures gracefully
+
+---
+
+## What's New in v1.1.0
+
+- **Per-group execution modes** — configure each group independently (sequential, parallel, disabled, manual_only)
+- **Update groups** — Z-Wave, ESPHome, HACS, HA Core, HA OS, Add-ons, Matter, MQTT, Other
+- **Z-Wave always sequential** — safety override, never parallel, with proper per-device tracking
+- **HA Core/OS exclusion** — disabled by default, never auto-updated
+- **Manual approval workflow** — items in manual_only groups need explicit approval before installation
+- **Full queue visibility** — queue status sensor includes complete item list with groups, versions, and status
+- **Waiting Approval sensor** — see how many items need your approval
+- **Approve All button** — approve all waiting items with one press
+- **Clear Queue button** — reset the queue and counters
+- **Multi-step options flow** — Step 1: Global settings, Step 2: Per-group modes, Step 3: Filters
+- **Group execution order** — device firmware first (Z-Wave, ESPHome, Matter, MQTT, Other), then add-ons, then HACS, then HA Core/OS last
+- **2 new services** — `approve_item` and `clear_queue`
 
 ---
 
 ## Features
 
+### Per-Group Execution Modes
+
+| Group | Default Mode | Notes |
+|-------|-------------|-------|
+| Z-Wave Firmware | Sequential | **Always forced sequential** — safety override |
+| ESPHome Devices | Sequential | Can be set to parallel |
+| HACS Integrations | Disabled | Won't auto-update by default |
+| Home Assistant Core | Disabled | Won't auto-update by default |
+| Home Assistant OS | Disabled | Won't auto-update by default |
+| Add-ons | Manual Only | Needs explicit approval |
+| Matter Devices | Sequential | Can be set to parallel |
+| MQTT Devices | Sequential | Can be set to parallel |
+| Other Updates | Manual Only | Needs explicit approval |
+
+### Execution Modes
+
+- **Sequential** — one at a time, wait for each to finish before starting the next
+- **Parallel** — all at once (safe for independent updates like ESPHome)
+- **Disabled** — skip entirely, never auto-update
+- **Manual Only** — show in queue but require explicit approval before installation
+
 ### Queue Management
-- Sequential one-at-a-time update installation
+- Full queue visibility with per-item group, version, and status info
+- Manual "Start Queue" button — nothing runs until YOU press it
 - Pause / Resume / Stop / Skip controls
+- Approve individual items or all waiting items at once
+- Clear queue to reset everything
 - Persistent queue state across HA restarts
 - Configurable delay between installs (default: 15s)
 - Configurable timeout per update (default: 2 hours)
 - Configurable retry count (default: 2)
 
 ### Smart Filtering
-- **Include integrations:** Only update entities from specific integrations (e.g., `zwave_js`, `esphome`, `hacs`)
 - **Exclude entities:** Skip specific entities by ID
 - **Exclude areas:** Skip all entities in certain areas
 - **Exclude labels:** Skip entities with certain labels
-- **Category filter:** All updates or firmware-only
-- **Mains-powered only:** Skip battery devices (important for Z-Wave)
+- **Z-Wave mains-powered only:** Skip battery devices (important for Z-Wave)
 - **Skip unavailable:** Skip sleeping/offline devices
 
 ### Scheduling
 - **Maintenance window:** Only install updates within a time window (e.g., 2 AM – 5 AM)
-- **Auto-update mode:** Automatically start queue when updates are discovered
+- **Auto-start mode:** Automatically start queue when updates are discovered during refresh
 
 ### Entities Exposed
 
 | Entity | Type | Description |
 |--------|------|-------------|
-| Queue Status | Sensor | Current state: idle, running, paused, stopped |
-| Pending Updates | Sensor | Number of updates waiting to install |
-| Current Update Target | Sensor | Entity currently being updated |
+| Queue Status | Sensor | Current state + full queue item list in attributes |
+| Pending Updates | Sensor | Number of updates ready to install |
+| Waiting Approval | Sensor | Number of items needing manual approval |
+| Current Update Target | Sensor | Entity currently being updated + details |
 | Last Success | Sensor | Last successfully updated entity |
 | Last Failure | Sensor | Last failed entity |
 | Completed Updates | Sensor | Count of successful updates this session |
@@ -67,7 +108,9 @@ Home Assistant exposes firmware and software updates as `update.*` entities. Whe
 | Refresh Update Scan | Button | Rescan for available updates |
 | Stop Queue | Button | Stop the queue immediately |
 | Skip Current Update | Button | Skip the current update |
-| Auto Update Enabled | Switch | Toggle auto-update mode |
+| Approve All Waiting | Button | Approve all manual-only items |
+| Clear Queue | Button | Clear queue and reset counters |
+| Auto Start Queue | Switch | Toggle auto-start mode |
 | Pause Queue | Switch | Toggle queue pause |
 
 ### Services
@@ -82,6 +125,8 @@ Home Assistant exposes firmware and software updates as `update.*` entities. Whe
 | `sh_update_manager.refresh_candidates` | Rescan for updates |
 | `sh_update_manager.install_all_eligible` | Discover and install all |
 | `sh_update_manager.install_entity` | Install a specific entity |
+| `sh_update_manager.approve_item` | Approve a manual-only item |
+| `sh_update_manager.clear_queue` | Clear queue and reset counters |
 
 ---
 
@@ -91,26 +136,26 @@ Home Assistant exposes firmware and software updates as `update.*` entities. Whe
 
 | File | Purpose |
 |------|---------|
-| `__init__.py` | Integration setup, service registration, config entry handling |
-| `const.py` | Constants: domain, defaults, config keys, service names |
+| `__init__.py` | Integration setup, service registration (10 services), config entry handling |
+| `const.py` | Constants: execution modes, update groups, group mapping, default modes, execution order |
 | `manifest.json` | HACS manifest with metadata |
-| `config_flow.py` | Config flow (setup) + Options flow (settings) |
-| `queue_manager.py` | Core queue logic: discovery, filtering, sequential install, persistence |
+| `config_flow.py` | Config flow + multi-step Options flow (global → per-group → filters) |
+| `queue_manager.py` | Core queue logic: discovery, grouping, per-group execution, safety overrides, persistence |
 | `services.yaml` | Service definitions for HA Developer Tools |
 
 ### Entity Platforms
 
 | File | Purpose |
 |------|---------|
-| `sensor.py` | 7 sensor entities (queue status, counts, targets) |
-| `button.py` | 4 button entities (update all, refresh, stop, skip) |
-| `switch.py` | 2 switch entities (auto-update toggle, pause toggle) |
+| `sensor.py` | 8 sensor entities (queue status with full list, counts, approval count, targets) |
+| `button.py` | 6 button entities (update all, refresh, stop, skip, approve all, clear) |
+| `switch.py` | 2 switch entities (auto-start toggle, pause toggle) |
 
 ### Translations
 
 | File | Purpose |
 |------|---------|
-| `strings.json` | Base strings for config/options flows |
+| `strings.json` | Base strings for config/options flows (3 steps) |
 | `translations/en.json` | English translations |
 
 ---
@@ -163,27 +208,40 @@ ha-sh-update-manager/
 
 1. Go to **Settings** → **Devices & Services** → **Add Integration**
 2. Search for "SH Auto Update Manager"
-3. Configure initial settings (auto-update, mains-only, category filter)
-4. Adjust advanced settings in the integration's **Options** (gear icon)
+3. Click **Submit** to create the entry
+4. Click the **gear icon** on the integration to open Options
+5. **Step 1:** Configure global settings (delays, retries, maintenance window)
+6. **Step 2:** Set per-group execution modes (sequential/parallel/disabled/manual_only)
+7. **Step 3:** Set exclusion filters (entities, areas, labels)
 
 ---
 
 ## Usage
 
-### Quick Start — Update All Z-Wave Firmware
+### Quick Start — Manual Queue Review
 
 1. Install and configure the integration
-2. In Options, set **Include integrations** to `zwave_js`
-3. Enable **Mains-powered only** (recommended for Z-Wave)
-4. Press the **Update All Eligible** button (or call `sh_update_manager.install_all_eligible`)
-5. Watch the sensors for progress
+2. Set Z-Wave and ESPHome to **sequential** in group modes
+3. Set HACS, HA Core, HA OS to **disabled**
+4. Press **Refresh Update Scan** to discover available updates
+5. Review the Queue Status sensor attributes to see all pending items
+6. Press **Update All Eligible** to start the queue
+7. Watch the sensors for progress
+
+### With Manual Approval
+
+1. Set desired groups to **manual_only** in group modes
+2. Press **Refresh Update Scan** to discover updates
+3. Check the **Waiting Approval** sensor to see items needing approval
+4. Call `sh_update_manager.approve_item` with the entity_id, or press **Approve All Waiting**
+5. Press **Update All Eligible** to start processing approved items
 
 ### Nightly Auto-Update
 
-1. Enable **Auto-update** switch
+1. Enable **Auto Start Queue** switch
 2. Enable **Maintenance window** in Options
 3. Set window to `02:00` – `05:00`
-4. The integration will automatically scan and install updates during the window
+4. Create an automation to call `sh_update_manager.refresh_candidates` at 2 AM
 
 ### Automation Example
 
@@ -202,7 +260,9 @@ automation:
 ## Important Notes
 
 - **Z-Wave firmware updates can be risky.** Some manufacturers warn that interrupting a firmware update can brick a device. Use conservative timeouts.
-- **Battery Z-Wave devices** may not update reliably unattended — they need to be awake. Use the **mains-powered only** filter for unattended runs.
+- **Z-Wave is ALWAYS sequential.** Even if you set the mode to parallel, the safety override forces sequential installation.
+- **HA Core/OS is ALWAYS sequential.** These updates affect the entire system and must not run alongside other updates.
+- **Battery Z-Wave devices** may not update reliably unattended — they need to be awake. The **mains-powered only** filter is enabled by default.
 - **The integration uses HA's native `update.install` action.** It does not bypass or modify the standard update mechanism.
 - **Queue state persists** across Home Assistant restarts. If HA restarts mid-queue, the queue will resume from where it left off.
 
@@ -222,6 +282,21 @@ This integration follows the **SH (Smarter Homes)** HACS branding standard:
 ---
 
 ## Audit Log
+
+### v1.1.0 — 2026-04-08
+- Per-group execution modes (sequential, parallel, disabled, manual_only)
+- 9 update groups with integration-to-group mapping
+- Z-Wave always-sequential safety override
+- HA Core/OS always-sequential safety override
+- Manual approval workflow for manual_only groups
+- Group execution order (device firmware first, system last)
+- Multi-step options flow (global → per-group → filters)
+- Full queue list in sensor attributes with group info
+- Waiting Approval sensor
+- Approve All and Clear Queue buttons
+- 2 new services: approve_item, clear_queue
+- 8 sensors, 6 buttons, 2 switches (up from 7/4/2)
+- 10 services (up from 8)
 
 ### v1.0.0 — 2026-04-08
 - Initial release

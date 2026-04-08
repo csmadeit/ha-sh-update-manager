@@ -1,4 +1,9 @@
-"""Switch entities for SH Auto Update Manager."""
+"""Switch entities for SH Auto Update Manager.
+
+Provides auto-start toggle and pause queue toggle.
+
+by Smarter Homes LLC — smarter.homes
+"""
 
 from __future__ import annotations
 
@@ -9,10 +14,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, CONF_AUTO_UPDATE, QUEUE_STATE_PAUSED, QUEUE_STATE_RUNNING
+from .const import DOMAIN, CONF_AUTO_START, QUEUE_STATE_PAUSED, QUEUE_STATE_RUNNING
 from .queue_manager import UpdateQueueManager
 
 _LOGGER = logging.getLogger(__name__)
+
+SW_VERSION = "1.1.0"
 
 
 async def async_setup_entry(
@@ -26,7 +33,7 @@ async def async_setup_entry(
     ]
 
     entities = [
-        AutoUpdateSwitch(hass, entry, queue_manager),
+        AutoStartSwitch(hass, entry, queue_manager),
         PauseQueueSwitch(entry, queue_manager),
     ]
 
@@ -45,7 +52,6 @@ class SHUpdateManagerSwitchBase(SwitchEntity):
         key: str,
         name: str,
     ) -> None:
-        """Initialize the switch."""
         self._entry = entry
         self._queue_manager = queue_manager
         self._attr_unique_id = f"{entry.entry_id}_{key}"
@@ -55,7 +61,7 @@ class SHUpdateManagerSwitchBase(SwitchEntity):
             "name": "SH Auto Update Manager",
             "manufacturer": "Smarter Homes LLC",
             "model": "Update Manager",
-            "sw_version": "1.0.0",
+            "sw_version": SW_VERSION,
             "configuration_url": "https://smarter.homes",
         }
 
@@ -73,8 +79,12 @@ class SHUpdateManagerSwitchBase(SwitchEntity):
         self.async_write_ha_state()
 
 
-class AutoUpdateSwitch(SHUpdateManagerSwitchBase):
-    """Switch to enable/disable auto-update mode."""
+class AutoStartSwitch(SHUpdateManagerSwitchBase):
+    """Switch to enable/disable auto-start mode.
+
+    When enabled, the queue automatically starts processing when new
+    updates are discovered during a refresh scan.
+    """
 
     _attr_icon = "mdi:auto-download"
 
@@ -84,27 +94,25 @@ class AutoUpdateSwitch(SHUpdateManagerSwitchBase):
         entry: ConfigEntry,
         queue_manager: UpdateQueueManager,
     ) -> None:
-        """Initialize."""
-        super().__init__(entry, queue_manager, "auto_update", "Auto Update Enabled")
+        super().__init__(
+            entry, queue_manager, "auto_start", "Auto Start Queue"
+        )
         self._hass = hass
 
     @property
     def is_on(self) -> bool:
-        """Return true if auto-update is enabled."""
-        return self._entry.options.get(CONF_AUTO_UPDATE, False)
+        return self._entry.options.get(CONF_AUTO_START, False)
 
     async def async_turn_on(self, **kwargs) -> None:
-        """Enable auto-update."""
         new_options = dict(self._entry.options)
-        new_options[CONF_AUTO_UPDATE] = True
+        new_options[CONF_AUTO_START] = True
         self._hass.config_entries.async_update_entry(
             self._entry, options=new_options
         )
 
     async def async_turn_off(self, **kwargs) -> None:
-        """Disable auto-update."""
         new_options = dict(self._entry.options)
-        new_options[CONF_AUTO_UPDATE] = False
+        new_options[CONF_AUTO_START] = False
         self._hass.config_entries.async_update_entry(
             self._entry, options=new_options
         )
@@ -118,18 +126,14 @@ class PauseQueueSwitch(SHUpdateManagerSwitchBase):
     def __init__(
         self, entry: ConfigEntry, queue_manager: UpdateQueueManager
     ) -> None:
-        """Initialize."""
         super().__init__(entry, queue_manager, "pause_queue", "Pause Queue")
 
     @property
     def is_on(self) -> bool:
-        """Return true if the queue is paused."""
         return self._queue_manager.state == QUEUE_STATE_PAUSED
 
     async def async_turn_on(self, **kwargs) -> None:
-        """Pause the queue."""
         await self._queue_manager.async_pause_queue()
 
     async def async_turn_off(self, **kwargs) -> None:
-        """Resume the queue."""
         await self._queue_manager.async_resume_queue()
