@@ -62,8 +62,9 @@ succeeded_items: list   # details of succeeded items
 ### NamedQueue Configuration
 ```
 name: str                    # display name
-match_type: str              # integration | area | label | entity
+match_type: str              # integration | area | label | entity | device_name | manufacturer
 match_value: str             # comma-separated values
+exclude_pattern: str         # comma-separated exclude patterns (matched against device name, manufacturer, model, entity ID)
 exec_mode: str               # sequential | parallel
 trigger_mode: str            # manual | auto_on_scan
 battery_handling: str        # exclude | defer_to_end | include
@@ -150,6 +151,30 @@ priority: int                # queue priority (1-100, lower = first)
 - **Fields**: `queue_name` (required)
 - **Behavior**: Removes the queue and persists the change. Queue devices/entities are removed on next reload.
 
+## Match Types
+
+| Match Type | Match Behavior | Example Values |
+|------------|---------------|----------------|
+| integration | Entity platform equals value | `zwave_js`, `esphome`, `hacs` |
+| area | Entity area ID equals value | `living_room`, `office` |
+| label | Entity label intersects values | `critical`, `firmware` |
+| entity | Entity ID equals value | `update.zooz_zen71_firmware` |
+| device_name | Partial match against device name + model (case-insensitive) | `Zooz`, `ZEN71` |
+| manufacturer | Exact match against device manufacturer (case-insensitive) | `Zooz`, `Inovelli` |
+
+### Exclude Patterns
+
+The `exclude_pattern` field allows comma-separated patterns that are matched case-insensitively against:
+- Device name
+- Manufacturer
+- Model
+- Entity ID
+- Friendly name
+
+If any pattern matches any of these fields, the entity is excluded from the queue even if it matches the main filter.
+
+**Example:** Match type `integration = zwave_js` with exclude pattern `ZEN32` → all Z-Wave updates except ZEN32 devices.
+
 ## Safety Overrides
 
 ### Z-Wave Sequential Enforcement
@@ -180,6 +205,8 @@ Battery handling modes:
 ### Features
 - **Queue Management**: Add, Edit, Delete queues directly from the panel
 - Modal form dialogs with dropdown selectors for match_type, exec_mode, trigger_mode, battery_handling
+- Exclude pattern field for filtering out specific devices from matched results
+- Context-sensitive placeholder text for match values based on selected match type
 - Advanced settings collapsible section (install_delay, install_timeout, max_retries, history_count)
 - Delete confirmation dialog
 - Real-time queue grid with auto-refresh (5-second polling)
