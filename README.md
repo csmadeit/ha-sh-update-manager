@@ -6,6 +6,24 @@ A Home Assistant custom integration for managing device updates with named queue
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 
+## Screenshots
+
+### Queue Management Panel
+![Queue List](docs/images/update_manager_queues.png)
+*Sidebar panel showing all queues with status, settings, and per-queue controls (Scan, Start, History)*
+
+### Add New Queue
+![Add Queue Form](docs/images/update_manager_add_queue.png)
+*Create a new queue with match type, match values, exclude patterns, execution mode, trigger mode, battery handling, and priority*
+
+### Advanced Filtering — Device Name
+![Device Name Filter](docs/images/update_manager_device_name_filter.png)
+*Filter by device name (e.g. "Zooz" to match all Zooz Z-Wave devices) with context-sensitive placeholder text*
+
+### Edit Queue
+![Edit Queue](docs/images/update_manager_edit_queue.png)
+*Edit existing queue settings — all fields are pre-filled with current values*
+
 ## Features
 
 ### Device-Per-Queue Architecture
@@ -13,7 +31,7 @@ Each queue you create becomes its own HA device with dedicated sensors, buttons,
 
 ### Named Queues
 Create queues like "Z-Wave Firmware", "ESPHome Devices", "HACS Updates" — each with independent configuration:
-- **Match rules**: Filter by integration, area, label, or specific entities
+- **Match rules**: Filter by integration, area, label, entity, device name, or manufacturer
 - **Execution mode**: Sequential (one-at-a-time) or parallel
 - **Trigger mode**: Manual or auto-on-scan
 - **Priority**: 1-100 (lower = runs first when using Start All)
@@ -42,6 +60,8 @@ Dedicated management UI accessible from the HA sidebar — the **central hub** f
 - **Add Queue** button to create new queues with a form dialog
 - **Edit** and **Delete** buttons on each queue card
 - Form dialogs with friendly dropdowns for all settings (match type, exec mode, trigger mode, battery handling, priority)
+- **Exclude Pattern** field to exclude specific devices (e.g. exclude ZEN32 from a Z-Wave queue)
+- Context-sensitive placeholder text that changes based on selected match type
 - Advanced settings collapsible section (install delay, timeout, retries, history count)
 - Delete confirmation dialog
 - Visual queue overview with real-time status
@@ -143,8 +163,9 @@ automation:
 | Option | Default | Description |
 |--------|---------|-------------|
 | name | — | Queue display name |
-| match_type | integration | How to match entities: integration, area, label, entity |
+| match_type | integration | How to match entities: integration, area, label, entity, device_name, manufacturer |
 | match_value | — | Comma-separated match values |
+| exclude_pattern | — | Comma-separated patterns to exclude (matched against device name, manufacturer, model, entity ID) |
 | exec_mode | sequential | sequential or parallel |
 | trigger_mode | manual | manual or auto_on_scan |
 | battery_handling | exclude | exclude, defer_to_end, or include |
@@ -160,7 +181,7 @@ automation:
 
 | Version | Changes |
 |---------|---------|
-| 2.0.3 | Queue management UI in sidebar panel: Add/Edit/Delete buttons, form dialogs with dropdowns, backend CRUD services, detailed scan logging |
+| 2.0.3 | Rename to Smarter.Homes branding, queue management UI in sidebar panel (Add/Edit/Delete), advanced filtering (device name, manufacturer match types, exclude patterns), comprehensive USAGE.md manual, cache-busting panel versioning |
 | 2.0.2 | Fix setup failure on production HA: config entry migration handler, robust error handling, Platform enum, remove entry_type from device_info |
 | 2.0.1 | Fix HA 2024.1.0 compatibility: robust panel registration with version fallbacks, remove frontend dependency |
 | 2.0.0 | Complete redesign: device-per-queue, sidebar panel, update history, battery handling, retry failed, priorities |

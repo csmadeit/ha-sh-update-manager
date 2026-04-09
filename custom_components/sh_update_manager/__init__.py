@@ -397,7 +397,7 @@ async def _register_panel(hass: HomeAssistant) -> None:
                 config={
                     "_panel_custom": {
                         "name": "sh-update-manager-panel",
-                        "module_url": f"{URL_BASE}/panel.js",
+                        "module_url": f"{URL_BASE}/panel.js?v=2.0.3",
                     }
                 },
                 require_admin=False,
