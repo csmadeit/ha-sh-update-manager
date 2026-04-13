@@ -7,7 +7,7 @@ by Smarter Homes LLC — smarter.homes
 """
 
 DOMAIN = "sh_update_manager"
-SW_VERSION = "2.0.3"
+SW_VERSION = "2.1.0"
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -109,8 +109,32 @@ GROUP_DISPLAY_NAMES: dict[str, str] = {
 # Which groups MUST be sequential (safety override)
 FORCE_SEQUENTIAL_GROUPS = {GROUP_ZWAVE, GROUP_HA_CORE, GROUP_HA_OS}
 
+# Core update entity IDs — these are always handled by the Supervisor (hassio
+# platform) on HAOS installations, so they share a platform with regular
+# add-on updates.  We identify them by well-known entity ID instead.
+CORE_UPDATE_ENTITY_IDS = {
+    "update.home_assistant_core_update",
+    "update.home_assistant_operating_system_update",
+    "update.home_assistant_supervisor_update",
+}
+
 # Default auto-created queues
 DEFAULT_QUEUES: list[dict] = [
+    {
+        "name": "Core Updates",
+        "match_type": MATCH_ENTITY,
+        "match_value": ",".join(sorted(CORE_UPDATE_ENTITY_IDS)),
+        "exec_mode": EXEC_MODE_SEQUENTIAL,
+        "trigger_mode": TRIGGER_MANUAL,
+        "battery_handling": BATTERY_INCLUDE,
+        "stop_on_failure": True,
+        "skip_unavailable": True,
+        "install_delay": DEFAULT_INSTALL_DELAY,
+        "install_timeout": DEFAULT_INSTALL_TIMEOUT,
+        "max_retries": DEFAULT_MAX_RETRIES,
+        "history_count": DEFAULT_HISTORY_COUNT,
+        "priority": 5,
+    },
     {
         "name": "Z-Wave Firmware",
         "match_type": MATCH_INTEGRATION,
@@ -160,6 +184,7 @@ DEFAULT_QUEUES: list[dict] = [
         "name": "Add-ons",
         "match_type": MATCH_INTEGRATION,
         "match_value": "hassio_addons,hassio",
+        "exclude_pattern": "home_assistant_core_update,home_assistant_operating_system_update,home_assistant_supervisor_update",
         "exec_mode": EXEC_MODE_SEQUENTIAL,
         "trigger_mode": TRIGGER_MANUAL,
         "battery_handling": BATTERY_INCLUDE,
@@ -251,7 +276,7 @@ SERVICE_DELETE_QUEUE = "delete_queue"
 # Storage
 # ---------------------------------------------------------------------------
 STORAGE_KEY = f"{DOMAIN}.queues"
-STORAGE_VERSION = 4
+STORAGE_VERSION = 5
 
 # ---------------------------------------------------------------------------
 # Panel / Frontend

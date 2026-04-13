@@ -53,7 +53,7 @@ One-click retry for all failed items in a queue. Failed items are re-queued and 
 
 ### Safety Overrides
 - **Z-Wave**: Always forced sequential regardless of config (firmware updates must be one-at-a-time)
-- **HA Core / HA OS**: Never included in default queues (prevents accidental self-update during other updates)
+- **HA Core / HA OS / Supervisor**: Separated into their own "Core Updates" queue (priority 5) so they never mix with regular add-on updates. The Add-ons queue auto-excludes core entities.
 
 ### Sidebar Panel
 Dedicated management UI accessible from the HA sidebar — the **central hub** for all queue management:
@@ -181,6 +181,7 @@ automation:
 
 | Version | Changes |
 |---------|---------|
+| 2.1.0 | Separate core updates (HA Core, HA OS, Supervisor) from add-on updates into dedicated "Core Updates" queue; existing installs auto-migrate |
 | 2.0.3 | Rename to Smarter.Homes branding, queue management UI in sidebar panel (Add/Edit/Delete), advanced filtering (device name, manufacturer match types, exclude patterns), comprehensive USAGE.md manual, cache-busting panel versioning |
 | 2.0.2 | Fix setup failure on production HA: config entry migration handler, robust error handling, Platform enum, remove entry_type from device_info |
 | 2.0.1 | Fix HA 2024.1.0 compatibility: robust panel registration with version fallbacks, remove frontend dependency |

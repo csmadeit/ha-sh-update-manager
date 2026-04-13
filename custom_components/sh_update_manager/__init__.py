@@ -1,4 +1,4 @@
-"""Smarter.Homes Update Manager v2.0.3 — integration setup.
+"""Smarter.Homes Update Manager v2.1.0 — integration setup.
 
 Device-per-queue architecture: each queue registers as a separate HA device.
 A hub device provides global overview and controls.
@@ -98,7 +98,7 @@ def queue_device_info(entry: ConfigEntry, queue_slug: str, queue_name: str) -> d
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Migrate old config entries to current version."""
     _LOGGER.info(
-        "Migrating Smarter.Homes Update Manager config entry from version %s.%s to 4",
+        "Migrating Smarter.Homes Update Manager config entry from version %s.%s to 5",
         config_entry.version,
         config_entry.minor_version,
     )
@@ -110,13 +110,36 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         hass.config_entries.async_update_entry(
             config_entry,
             data=new_data,
-            version=4,
+            version=5,
             minor_version=1,
         )
         _LOGGER.info(
-            "Migration complete: reset to default queues (version %s -> 4)",
+            "Migration complete: reset to default queues (version %s -> 5)",
             config_entry.version,
         )
+    elif config_entry.version == 4:
+        # v2.0.x -> v2.1.0: add Core Updates queue and exclude pattern on Add-ons.
+        from .const import CORE_UPDATE_ENTITY_IDS
+        queues = list(
+            config_entry.options.get(CONF_QUEUES, config_entry.data.get(CONF_QUEUES, []))
+        )
+        # Check if a Core Updates queue already exists
+        has_core = any(q.get("name", "").lower() == "core updates" for q in queues)
+        if not has_core:
+            queues.insert(0, DEFAULT_QUEUES[0])  # Core Updates is first default
+            _LOGGER.info("Migration v4->v5: added 'Core Updates' queue")
+        # Add exclude_pattern to any Add-ons queue missing it
+        for q in queues:
+            if q.get("name", "").lower() == "add-ons" and not q.get("exclude_pattern"):
+                q["exclude_pattern"] = ",".join(sorted(CORE_UPDATE_ENTITY_IDS))
+                _LOGGER.info("Migration v4->v5: added exclude_pattern to 'Add-ons' queue")
+        hass.config_entries.async_update_entry(
+            config_entry,
+            data={CONF_QUEUES: queues},
+            version=5,
+            minor_version=1,
+        )
+        _LOGGER.info("Migration complete: v4 -> v5 (core/add-on separation)")
 
     return True
 
@@ -397,7 +420,7 @@ async def _register_panel(hass: HomeAssistant) -> None:
                 config={
                     "_panel_custom": {
                         "name": "sh-update-manager-panel",
-                        "module_url": f"{URL_BASE}/panel.js?v=2.0.3",
+                        "module_url": f"{URL_BASE}/panel.js?v={SW_VERSION}",
                     }
                 },
                 require_admin=False,
