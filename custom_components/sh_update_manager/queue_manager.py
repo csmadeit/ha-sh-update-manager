@@ -204,6 +204,14 @@ class NamedQueue:
         self._current_run: RunRecord | None = None
         self._next_run_id = 1
         self._last_run_result: RunRecord | None = None
+        # Transient diagnostics from the most recent scan. Not persisted —
+        # regenerated on every async_scan() call. Exposed to the UI so users
+        # can see *why* a given update entity did not end up in the queue
+        # (e.g. battery device excluded, unavailable, no matching integration).
+        self._last_scan_at: datetime | None = None
+        self._last_scan_counts: dict[str, int] = {}
+        self._last_scan_skipped: list[dict[str, Any]] = []
+        self._last_scan_candidates: int = 0
 
     @property
     def priority(self) -> int:
@@ -319,6 +327,20 @@ class NamedQueue:
             }
             for i in self._items
         ]
+
+    @property
+    def last_scan_summary(self) -> dict[str, Any]:
+        """Diagnostics from the most recent scan (transient, not persisted).
+
+        Consumed by the sidebar panel and advanced automations that want to
+        know *why* an update entity did not end up in this queue.
+        """
+        return {
+            "at": self._last_scan_at.isoformat() if self._last_scan_at else None,
+            "candidates": self._last_scan_candidates,
+            "counts": dict(self._last_scan_counts),
+            "skipped": list(self._last_scan_skipped),
+        }
 
     @property
     def pending_summary(self) -> str:
@@ -466,39 +488,93 @@ class NamedQueue:
         skipped_not_on = 0
         skipped_unavailable = 0
         skipped_battery = 0
+        # Detailed per-entity skip log for the UI. Only records entities that
+        # passed the match rule (otherwise the list would be huge). That means
+        # users only see skip reasons for entities that "could have" been in
+        # this queue — not every update entity in HA.
+        skipped_details: list[dict[str, Any]] = []
+
+        def _record_skip(
+            entity_entry: er.RegistryEntry, reason: str, note: str = ""
+        ) -> None:
+            state = self.hass.states.get(entity_entry.entity_id)
+            friendly = (
+                state.attributes.get("friendly_name") if state else None
+            ) or entity_entry.name or entity_entry.entity_id
+            skipped_details.append({
+                "entity_id": entity_entry.entity_id,
+                "friendly_name": friendly,
+                "platform": entity_entry.platform or "",
+                "reason": reason,
+                "note": note,
+            })
+
         for entity_entry in ent_reg.entities.values():
             if not entity_entry.entity_id.startswith("update."):
                 skipped_no_update += 1
                 continue
+            if not self._entity_matches(entity_entry):
+                # Not eligible for THIS queue — don't log per-entity (noise).
+                skipped_no_match += 1
+                continue
+            # Past this point the entity is in-scope for this queue, so any
+            # skip is worth surfacing in the UI.
             if entity_entry.disabled:
                 skipped_disabled += 1
-                continue
-            if not self._entity_matches(entity_entry):
-                skipped_no_match += 1
+                _record_skip(
+                    entity_entry,
+                    "disabled",
+                    f"disabled_by={entity_entry.disabled_by}",
+                )
                 continue
             if self._matches_exclude_pattern(entity_entry):
                 skipped_excluded += 1
+                _record_skip(
+                    entity_entry,
+                    "exclude_pattern",
+                    f"pattern='{self.exclude_pattern}'",
+                )
                 _LOGGER.debug(
                     "Queue '%s': skip %s (matches exclude pattern '%s')",
                     self.name, entity_entry.entity_id, self.exclude_pattern,
                 )
                 continue
             state = self.hass.states.get(entity_entry.entity_id)
-            if state is None or state.state != STATE_ON:
+            if state is None:
                 skipped_not_on += 1
-                _LOGGER.debug(
-                    "Queue '%s': skip %s (state=%s, need 'on')",
-                    self.name, entity_entry.entity_id,
-                    state.state if state else "None",
-                )
+                _record_skip(entity_entry, "no_state", "entity has no state")
                 continue
             if self.skip_unavailable and state.state == "unavailable":
                 skipped_unavailable += 1
+                _record_skip(
+                    entity_entry,
+                    "unavailable",
+                    "entity state=unavailable (skip_unavailable=True)",
+                )
+                continue
+            if state.state != STATE_ON:
+                # 'off' = no update available. Not really an error; show in UI
+                # so users can confirm "scan saw the entity, no update".
+                skipped_not_on += 1
+                _record_skip(
+                    entity_entry,
+                    "up_to_date",
+                    f"state={state.state} (no update available)",
+                )
+                _LOGGER.debug(
+                    "Queue '%s': skip %s (state=%s, need 'on')",
+                    self.name, entity_entry.entity_id, state.state,
+                )
                 continue
             group = INTEGRATION_GROUP_MAP.get(entity_entry.platform, "other")
             is_battery = self._is_battery_device(entity_entry)
             if self.battery_handling == BATTERY_EXCLUDE and is_battery:
                 skipped_battery += 1
+                _record_skip(
+                    entity_entry,
+                    "battery_excluded",
+                    "battery device (battery_handling=exclude on this queue)",
+                )
                 _LOGGER.debug(
                     "Queue '%s': skip %s (battery device, battery_handling=exclude)",
                     self.name, entity_entry.entity_id,
@@ -572,10 +648,25 @@ class NamedQueue:
             pending.sort(key=lambda i: (1 if i.is_battery else 0))
             self._items = pending + non_pending
 
+        self._last_scan_at = datetime.now()
+        self._last_scan_candidates = len(candidates)
+        self._last_scan_counts = {
+            "disabled": skipped_disabled,
+            "no_match": skipped_no_match,
+            "excluded": skipped_excluded,
+            "up_to_date": skipped_not_on,
+            "unavailable": skipped_unavailable,
+            "battery": skipped_battery,
+        }
+        # Cap at 200 to keep the sensor attribute payload under HA's state
+        # size warning threshold (16 KB). Most installs have << 200 update
+        # entities per queue anyway.
+        self._last_scan_skipped = skipped_details[:200]
+
         self._notify()
         _LOGGER.info(
             "Queue '%s': %d candidates, %d new, %d re-queued, %d total "
-            "(skipped: %d disabled, %d no-match, %d excluded, %d not-on, %d unavail, %d battery)",
+            "(skipped: %d disabled, %d no-match, %d excluded, %d up-to-date, %d unavail, %d battery)",
             self.name, len(candidates), new_count, requeued_count, len(self._items),
             skipped_disabled, skipped_no_match, skipped_excluded, skipped_not_on,
             skipped_unavailable, skipped_battery,

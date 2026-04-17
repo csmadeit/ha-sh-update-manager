@@ -1,6 +1,6 @@
 /**
- * Smarter.Homes Update Manager — Sidebar Panel v2.1.1
- * Full queue management UI with Add/Edit/Delete.
+ * Smarter.Homes Update Manager — Sidebar Panel v2.1.2
+ * Full queue management UI with Add/Edit/Delete + last-scan diagnostics.
  *
  * by Smarter Homes LLC — smarter.homes
  */
@@ -215,6 +215,7 @@ class SHUpdateManagerPanel extends LitElement {
     this._editingQueue = null;
     this._formData = this._defaultFormData();
     this._confirmDelete = "";
+    this._skippedOpen = new Set();  // slugs with expanded skip-diagnostics
   }
 
   _defaultFormData() {
@@ -294,6 +295,7 @@ class SHUpdateManagerPanel extends LitElement {
           completed: pendingSensor?.attributes?.completed || 0,
           failed: pendingSensor?.attributes?.failed || 0,
           items: items,
+          last_scan: itemsSensor?.attributes?.last_scan || null,
           last_run: lastRunSensor?.attributes || null,
           last_run_result: lastRunSensor?.state || "idle",
           history_count: historySensor ? parseInt(historySensor.state) || 0 : 0,
@@ -504,6 +506,14 @@ class SHUpdateManagerPanel extends LitElement {
           <button class="btn btn-secondary" @click=${() => this._toggleHistory(idx)}>
             History (${queue.history_count})
           </button>
+          ${this._skippedCount(queue) > 0 ? html`
+            <button class="btn btn-secondary"
+              title="Show update entities that matched this queue but were skipped on the last scan"
+              @click=${() => this._toggleSkipped(queue.slug)}>
+              ${this._skippedOpen.has(queue.slug) ? "Hide" : "Why skipped?"}
+              (${this._skippedCount(queue)})
+            </button>
+          ` : ""}
         </div>
 
         ${queue.items.length > 0 ? html`
@@ -511,6 +521,60 @@ class SHUpdateManagerPanel extends LitElement {
             ${queue.items.map(item => this._renderItem(item))}
           </div>
         ` : ""}
+
+        ${this._skippedOpen.has(queue.slug) ? this._renderSkipped(queue) : ""}
+      </div>
+    `;
+  }
+
+  _skippedCount(queue) {
+    const list = queue?.last_scan?.skipped;
+    return Array.isArray(list) ? list.length : 0;
+  }
+
+  _renderSkipped(queue) {
+    const scan = queue.last_scan || {};
+    const list = Array.isArray(scan.skipped) ? scan.skipped : [];
+    const counts = scan.counts || {};
+    const scannedAt = scan.at ? new Date(scan.at).toLocaleString() : "never";
+    return html`
+      <div class="history-section">
+        <h3>Why skipped — ${queue.name}</h3>
+        <p style="margin:0 0 8px; color:var(--secondary-text-color)">
+          Last scan: ${scannedAt} &middot; candidates kept: ${scan.candidates ?? 0}
+          ${Object.keys(counts).length ? html`
+            <br>Skipped totals:
+            ${Object.entries(counts)
+              .filter(([, v]) => v > 0)
+              .map(([k, v]) => `${k}=${v}`)
+              .join(", ") || "none"}
+          ` : ""}
+        </p>
+        ${list.length === 0 ? html`<p>No skipped entities on the last scan.</p>` : html`
+          <table style="width:100%; border-collapse:collapse; font-size:13px">
+            <thead>
+              <tr style="text-align:left; border-bottom:1px solid var(--divider-color, #e0e0e0)">
+                <th style="padding:4px 6px">Entity</th>
+                <th style="padding:4px 6px">Platform</th>
+                <th style="padding:4px 6px">Reason</th>
+                <th style="padding:4px 6px">Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${list.map(row => html`
+                <tr style="border-bottom:1px solid var(--divider-color, #eee)">
+                  <td style="padding:4px 6px">
+                    <div>${row.friendly_name || row.entity_id}</div>
+                    <small style="color:var(--secondary-text-color)">${row.entity_id}</small>
+                  </td>
+                  <td style="padding:4px 6px">${row.platform || ""}</td>
+                  <td style="padding:4px 6px"><code>${row.reason}</code></td>
+                  <td style="padding:4px 6px; color:var(--secondary-text-color)">${row.note || ""}</td>
+                </tr>
+              `)}
+            </tbody>
+          </table>
+        `}
       </div>
     `;
   }

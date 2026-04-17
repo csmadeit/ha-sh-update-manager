@@ -217,7 +217,10 @@ class QueueItemsSensor(SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return {"items": self._queue.items_summary}
+        return {
+            "items": self._queue.items_summary,
+            "last_scan": self._queue.last_scan_summary,
+        }
 
 
 class QueueLastRunResultSensor(SensorEntity):

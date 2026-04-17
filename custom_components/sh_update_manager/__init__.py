@@ -33,6 +33,7 @@ except ImportError:
 from .const import (
     DOMAIN,
     CONF_QUEUES,
+    CONF_SCAN_INTERVAL_MINUTES,
     SERVICE_SCAN_ALL,
     SERVICE_START_QUEUE,
     SERVICE_STOP_QUEUE,
@@ -51,6 +52,7 @@ from .const import (
     DEFAULT_MAX_RETRIES,
     DEFAULT_HISTORY_COUNT,
     DEFAULT_PRIORITY,
+    DEFAULT_SCAN_INTERVAL_MINUTES,
     EXEC_MODES_LIST,
     TRIGGER_MODES_LIST,
     BATTERY_MODES_LIST,
@@ -178,10 +180,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # --- 4. Store in hass.data ---
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {
+    entry_bucket: dict[str, Any] = {
         "coordinator": coordinator,
         "entry": entry,
+        "unsub_scan_interval": None,
     }
+    hass.data[DOMAIN][entry.entry_id] = entry_bucket
+
+    # --- 4b. Schedule automatic scans if configured ---
+    _reschedule_auto_scan(hass, entry, entry_bucket, coordinator)
 
     # --- 5. Register sidebar panel (non-fatal) ---
     try:

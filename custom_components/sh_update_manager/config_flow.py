@@ -35,6 +35,7 @@ from .const import (
     CONF_MAX_RETRIES,
     CONF_HISTORY_COUNT,
     CONF_PRIORITY,
+    CONF_SCAN_INTERVAL_MINUTES,
     EXEC_MODES_LIST,
     TRIGGER_MODES_LIST,
     BATTERY_MODES_LIST,
@@ -47,6 +48,7 @@ from .const import (
     DEFAULT_MAX_RETRIES,
     DEFAULT_HISTORY_COUNT,
     DEFAULT_PRIORITY,
+    DEFAULT_SCAN_INTERVAL_MINUTES,
     GROUP_DISPLAY_NAMES,
 )
 
@@ -94,7 +96,24 @@ class SHUpdateManagerOptionsFlow(config_entries.OptionsFlow):
         self._queues: list[dict[str, Any]] = list(
             config_entry.options.get(CONF_QUEUES, config_entry.data.get(CONF_QUEUES, []))
         )
+        self._scan_interval: int = int(
+            config_entry.options.get(
+                CONF_SCAN_INTERVAL_MINUTES,
+                config_entry.data.get(
+                    CONF_SCAN_INTERVAL_MINUTES, DEFAULT_SCAN_INTERVAL_MINUTES
+                ),
+            )
+        )
         self._editing_index: int | None = None
+
+    def _save_entry(self) -> FlowResult:
+        return self.async_create_entry(
+            title="Smarter.Homes Update Manager",
+            data={
+                CONF_QUEUES: self._queues,
+                CONF_SCAN_INTERVAL_MINUTES: self._scan_interval,
+            },
+        )
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -103,6 +122,8 @@ class SHUpdateManagerOptionsFlow(config_entries.OptionsFlow):
             action = user_input.get("action", "done")
             if action == "add":
                 return await self.async_step_add_queue()
+            if action == "global_settings":
+                return await self.async_step_global_settings()
             if action.startswith("edit_"):
                 idx = int(action.split("_")[1])
                 self._editing_index = idx
@@ -113,12 +134,17 @@ class SHUpdateManagerOptionsFlow(config_entries.OptionsFlow):
                     self._queues.pop(idx)
                 return await self.async_step_init()
             # done
-            return self.async_create_entry(
-                title="Smarter.Homes Update Manager",
-                data={CONF_QUEUES: self._queues},
-            )
+            return self._save_entry()
 
-        options = {"add": "Add new queue", "done": "Save and close"}
+        options = {
+            "global_settings": (
+                f"Global settings (auto-scan: "
+                f"{self._scan_interval} min{'s' if self._scan_interval != 1 else ''}"
+                f"{' — off' if self._scan_interval == 0 else ''})"
+            ),
+            "add": "Add new queue",
+            "done": "Save and close",
+        }
         for i, q in enumerate(self._queues):
             options[f"edit_{i}"] = f"Edit: {q.get(CONF_QUEUE_NAME, f'Queue {i}')}"
             options[f"delete_{i}"] = f"Delete: {q.get(CONF_QUEUE_NAME, f'Queue {i}')}"
@@ -127,6 +153,27 @@ class SHUpdateManagerOptionsFlow(config_entries.OptionsFlow):
             step_id="init",
             data_schema=vol.Schema({
                 vol.Required("action", default="done"): vol.In(options),
+            }),
+        )
+
+    async def async_step_global_settings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        if user_input is not None:
+            self._scan_interval = int(
+                user_input.get(
+                    CONF_SCAN_INTERVAL_MINUTES, DEFAULT_SCAN_INTERVAL_MINUTES
+                )
+            )
+            return await self.async_step_init()
+
+        return self.async_show_form(
+            step_id="global_settings",
+            data_schema=vol.Schema({
+                vol.Optional(
+                    CONF_SCAN_INTERVAL_MINUTES,
+                    default=self._scan_interval,
+                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=10080)),
             }),
         )
 
