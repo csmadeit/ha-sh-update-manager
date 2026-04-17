@@ -7,7 +7,7 @@ by Smarter Homes LLC — smarter.homes
 """
 
 DOMAIN = "sh_update_manager"
-SW_VERSION = "2.1.0"
+SW_VERSION = "2.1.1"
 
 # ---------------------------------------------------------------------------
 # Defaults

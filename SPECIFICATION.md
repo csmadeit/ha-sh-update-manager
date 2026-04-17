@@ -1,4 +1,4 @@
-# Smarter.Homes Update Manager — Specification v2.0.3
+# Smarter.Homes Update Manager — Specification v2.1.1
 
 **by Smarter Homes LLC — smarter.homes**
 
@@ -135,6 +135,7 @@ priority: int                # queue priority (1-100, lower = first)
 - **Domain**: sh_update_manager
 - **Fields**: `queue_name` (string, required)
 - **Behavior**: Scans a single queue for pending updates without starting it. Logs detailed breakdown of skipped entities (disabled, no-match, not-on, unavailable, battery-excluded).
+- **Re-queue semantics (v2.1.1+)**: If an update entity that was previously completed/failed/skipped reports a new installed/latest version pair (i.e. a fresh release landed for the same entity), the scan resets that item back to `pending` and refreshes its version/display attributes. This fixes the previous behavior where the Scan button appeared to "do nothing" after an entity cycled through an install and then had another release published.
 
 ### add_queue
 - **Domain**: sh_update_manager
@@ -250,7 +251,7 @@ custom_components/sh_update_manager/
 ├── button.py            # Hub + per-queue buttons
 ├── switch.py            # Hub + per-queue switches
 ├── config_flow.py       # Setup + options flow with queue CRUD
-├── manifest.json        # Integration manifest (v2.0.3)
+├── manifest.json        # Integration manifest (v2.1.1)
 ├── services.yaml        # Service definitions
 ├── strings.json         # UI strings
 ├── translations/

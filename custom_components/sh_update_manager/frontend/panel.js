@@ -1,5 +1,5 @@
 /**
- * Smarter.Homes Update Manager — Sidebar Panel v2.0.3
+ * Smarter.Homes Update Manager — Sidebar Panel v2.1.1
  * Full queue management UI with Add/Edit/Delete.
  *
  * by Smarter Homes LLC — smarter.homes

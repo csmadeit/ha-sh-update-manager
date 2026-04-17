@@ -516,13 +516,51 @@ class NamedQueue:
         if self.battery_handling == BATTERY_DEFER_TO_END:
             candidates.sort(key=lambda c: (1 if c.is_battery else 0))
 
-        existing_ids = {i.entity_id for i in self._items}
+        existing_map = {i.entity_id: i for i in self._items}
         candidate_ids = {c.entity_id for c in candidates}
         new_count = 0
+        requeued_count = 0
         for c in candidates:
-            if c.entity_id not in existing_ids:
+            existing = existing_map.get(c.entity_id)
+            if existing is None:
+                # Brand new candidate — add it.
                 self._items.append(c)
                 new_count += 1
+                continue
+            if existing.status in (
+                ITEM_STATUS_COMPLETED,
+                ITEM_STATUS_FAILED,
+                ITEM_STATUS_SKIPPED,
+            ):
+                # A previously-finalized item has a fresh update available
+                # (update entity is 'on' again). This happens when a new
+                # version is released for the same entity after a prior run.
+                # Reset the item back to pending so Scan/Start will pick it
+                # up again. Refresh version/friendly_name from the candidate
+                # so the UI reflects the new installed → latest transition.
+                version_changed = (
+                    existing.installed_version != c.installed_version
+                    or existing.latest_version != c.latest_version
+                )
+                if version_changed:
+                    existing.status = ITEM_STATUS_PENDING
+                    existing.error = None
+                    existing.retries = 0
+                    existing.started_at = None
+                    existing.completed_at = None
+                    existing.duration = None
+                    existing.installed_version = c.installed_version
+                    existing.latest_version = c.latest_version
+                    existing.friendly_name = c.friendly_name
+                    existing.is_battery = c.is_battery
+                    existing.group = c.group
+                    requeued_count += 1
+            else:
+                # Pending/installing — keep authoritative state but refresh
+                # version/display attributes so the UI stays current.
+                existing.installed_version = c.installed_version
+                existing.latest_version = c.latest_version
+                existing.friendly_name = c.friendly_name
         self._items = [
             i for i in self._items
             if i.entity_id in candidate_ids
@@ -536,9 +574,9 @@ class NamedQueue:
 
         self._notify()
         _LOGGER.info(
-            "Queue '%s': %d candidates, %d new, %d total "
+            "Queue '%s': %d candidates, %d new, %d re-queued, %d total "
             "(skipped: %d disabled, %d no-match, %d excluded, %d not-on, %d unavail, %d battery)",
-            self.name, len(candidates), new_count, len(self._items),
+            self.name, len(candidates), new_count, requeued_count, len(self._items),
             skipped_disabled, skipped_no_match, skipped_excluded, skipped_not_on,
             skipped_unavailable, skipped_battery,
         )
