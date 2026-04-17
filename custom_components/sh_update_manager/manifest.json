@@ -10,6 +10,6 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/csmadeit/ha-sh-update-manager/issues",
   "requirements": [],
-  "version": "2.1.2",
+  "version": "2.1.3",
   "homeassistant": "2024.1.0"
 }

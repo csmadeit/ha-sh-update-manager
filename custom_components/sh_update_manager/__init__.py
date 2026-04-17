@@ -1,4 +1,4 @@
-"""Smarter.Homes Update Manager v2.1.1 — integration setup.
+"""Smarter.Homes Update Manager v2.1.3 — integration setup.
 
 Device-per-queue architecture: each queue registers as a separate HA device.
 A hub device provides global overview and controls.
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import timedelta
 from typing import Any
 
 import voluptuous as vol
@@ -19,6 +20,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.event import async_track_time_interval
 
 try:
     from homeassistant.components.frontend import async_register_built_in_panel
@@ -443,6 +445,49 @@ async def _register_panel(hass: HomeAssistant) -> None:
         _LOGGER.exception("Could not register sidebar panel")
 
 
+def _reschedule_auto_scan(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    entry_bucket: dict[str, Any],
+    coordinator: Any,
+) -> None:
+    """Register or re-register the auto-scan timer based on current config.
+
+    Reads `scan_interval_minutes` from entry.options (falling back to
+    entry.data). `0` disables the timer. Any existing timer is cancelled
+    first so this is safe to call on every setup/reload.
+    """
+    # Cancel any existing timer first.
+    unsub = entry_bucket.get("unsub_scan_interval")
+    if unsub is not None:
+        try:
+            unsub()
+        except Exception:  # pragma: no cover — best effort
+            _LOGGER.exception("Failed to cancel previous auto-scan timer")
+        entry_bucket["unsub_scan_interval"] = None
+
+    interval_min = int(
+        entry.options.get(
+            CONF_SCAN_INTERVAL_MINUTES,
+            entry.data.get(CONF_SCAN_INTERVAL_MINUTES, DEFAULT_SCAN_INTERVAL_MINUTES),
+        )
+    )
+    if interval_min <= 0:
+        _LOGGER.info("Auto-scan disabled (scan_interval_minutes=0)")
+        return
+
+    async def _scheduled_scan(_now: Any) -> None:
+        try:
+            await coordinator.async_scan_all()
+        except Exception:  # pragma: no cover — log but keep the timer alive
+            _LOGGER.exception("Scheduled scan_all failed")
+
+    entry_bucket["unsub_scan_interval"] = async_track_time_interval(
+        hass, _scheduled_scan, timedelta(minutes=interval_min)
+    )
+    _LOGGER.info("Scheduled scan_all every %d minute(s)", interval_min)
+
+
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
 
@@ -451,6 +496,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if data:
+        unsub = data.get("unsub_scan_interval")
+        if unsub is not None:
+            try:
+                unsub()
+            except Exception:  # pragma: no cover
+                _LOGGER.exception("Failed to cancel auto-scan timer on unload")
+            data["unsub_scan_interval"] = None
         coordinator = data.get("coordinator")
         if coordinator:
             await coordinator.async_shutdown()
