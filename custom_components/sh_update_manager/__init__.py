@@ -1,4 +1,4 @@
-"""Smarter.Homes Update Manager v2.1.0 — integration setup.
+"""Smarter.Homes Update Manager v2.1.1 — integration setup.
 
 Device-per-queue architecture: each queue registers as a separate HA device.
 A hub device provides global overview and controls.

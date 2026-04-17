@@ -181,6 +181,7 @@ automation:
 
 | Version | Changes |
 |---------|---------|
+| 2.1.1 | Fix: Scan/Scan All no longer appear to "do nothing" when a previously-completed update entity has a new release. Completed/failed/skipped items are automatically re-queued to `pending` when a newer installed/latest version is detected on the same entity, and pending items have their version/display info refreshed on every scan. |
 | 2.1.0 | Separate core updates (HA Core, HA OS, Supervisor) from add-on updates into dedicated "Core Updates" queue; existing installs auto-migrate |
 | 2.0.3 | Rename to Smarter.Homes branding, queue management UI in sidebar panel (Add/Edit/Delete), advanced filtering (device name, manufacturer match types, exclude patterns), comprehensive USAGE.md manual, cache-busting panel versioning |
 | 2.0.2 | Fix setup failure on production HA: config entry migration handler, robust error handling, Platform enum, remove entry_type from device_info |
