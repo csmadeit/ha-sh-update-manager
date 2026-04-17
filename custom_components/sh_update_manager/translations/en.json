@@ -3,14 +3,14 @@
     "step": {
       "user": {
         "title": "Smarter.Homes Update Manager",
-        "description": "Select which default queues to create. You can add more later in options.\n{queue_info}",
+        "description": "Select which default queues to create. You can add more later in options.",
         "data": {
-          "queue_0": "Z-Wave Firmware (sequential, manual, mains-powered)",
-          "queue_1": "ESPHome Devices (sequential, manual)",
-          "queue_2": "HACS Updates (sequential, manual)",
-          "queue_3": "Add-ons (sequential, manual)",
-          "queue_4": "Other Updates \u2014 Matter, MQTT (sequential, manual)",
-          "queue_info": ""
+          "queue_0": "Core Updates (Home Assistant Core/OS/Supervisor — sequential, manual)",
+          "queue_1": "Z-Wave Firmware (sequential, manual, mains-powered only by default)",
+          "queue_2": "ESPHome Devices (sequential, manual)",
+          "queue_3": "HACS Updates (sequential, manual)",
+          "queue_4": "Add-ons (sequential, manual)",
+          "queue_5": "Other Updates \u2014 Matter, MQTT (sequential, manual)"
         }
       }
     }
@@ -22,6 +22,13 @@
         "description": "Select an action to manage your update queues.",
         "data": {
           "action": "Action"
+        }
+      },
+      "global_settings": {
+        "title": "Global Settings",
+        "description": "Settings that apply to all queues.",
+        "data": {
+          "scan_interval_minutes": "Auto-scan interval in minutes (0 = disabled, manual scans only)"
         }
       },
       "add_queue": {

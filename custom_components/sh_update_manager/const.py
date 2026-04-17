@@ -7,7 +7,7 @@ by Smarter Homes LLC — smarter.homes
 """
 
 DOMAIN = "sh_update_manager"
-SW_VERSION = "2.1.1"
+SW_VERSION = "2.1.2"
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -17,6 +17,7 @@ DEFAULT_INSTALL_TIMEOUT = 7200  # 2 hours per device
 DEFAULT_MAX_RETRIES = 2
 DEFAULT_HISTORY_COUNT = 25  # past runs to keep per queue
 DEFAULT_PRIORITY = 50  # middle of 1-100 range
+DEFAULT_SCAN_INTERVAL_MINUTES = 0  # 0 = disabled (manual scans only)
 
 # ---------------------------------------------------------------------------
 # Queue states
@@ -250,6 +251,9 @@ CONF_MAX_RETRIES = "max_retries"
 CONF_HISTORY_COUNT = "history_count"
 CONF_PRIORITY = "priority"
 CONF_EXCLUDE_PATTERN = "exclude_pattern"
+
+# Integration-level (global) config keys
+CONF_SCAN_INTERVAL_MINUTES = "scan_interval_minutes"
 
 # ---------------------------------------------------------------------------
 # Services
