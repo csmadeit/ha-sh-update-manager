@@ -7,7 +7,7 @@ by Smarter Homes LLC — smarter.homes
 """
 
 DOMAIN = "sh_update_manager"
-SW_VERSION = "2.1.3"
+SW_VERSION = "2.1.4"
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -142,7 +142,12 @@ DEFAULT_QUEUES: list[dict] = [
         "match_value": "zwave_js,zwave",
         "exec_mode": EXEC_MODE_SEQUENTIAL,
         "trigger_mode": TRIGGER_MANUAL,
-        "battery_handling": BATTERY_EXCLUDE,
+        # v2.1.4: default flipped from exclude → include. Battery Z-Wave
+        # sensors (e.g. ZSE44) do get OTA firmware updates, and users
+        # reported them being silently filtered out. Users who want the
+        # old mains-only behaviour can set battery_handling=exclude
+        # (or defer_to_end) on this queue via Options.
+        "battery_handling": BATTERY_INCLUDE,
         "stop_on_failure": False,
         "skip_unavailable": True,
         "install_delay": DEFAULT_INSTALL_DELAY,

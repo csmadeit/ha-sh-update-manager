@@ -1,4 +1,4 @@
-"""Smarter.Homes Update Manager v2.1.3 — integration setup.
+"""Smarter.Homes Update Manager v2.1.4 — integration setup.
 
 Device-per-queue architecture: each queue registers as a separate HA device.
 A hub device provides global overview and controls.
@@ -102,7 +102,7 @@ def queue_device_info(entry: ConfigEntry, queue_slug: str, queue_name: str) -> d
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Migrate old config entries to current version."""
     _LOGGER.info(
-        "Migrating Smarter.Homes Update Manager config entry from version %s.%s to 5",
+        "Migrating Smarter.Homes Update Manager config entry from version %s.%s to 6",
         config_entry.version,
         config_entry.minor_version,
     )
@@ -114,25 +114,25 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         hass.config_entries.async_update_entry(
             config_entry,
             data=new_data,
-            version=5,
+            version=6,
             minor_version=1,
         )
         _LOGGER.info(
-            "Migration complete: reset to default queues (version %s -> 5)",
+            "Migration complete: reset to default queues (version %s -> 6)",
             config_entry.version,
         )
-    elif config_entry.version == 4:
+        return True
+
+    if config_entry.version == 4:
         # v2.0.x -> v2.1.0: add Core Updates queue and exclude pattern on Add-ons.
         from .const import CORE_UPDATE_ENTITY_IDS
         queues = list(
             config_entry.options.get(CONF_QUEUES, config_entry.data.get(CONF_QUEUES, []))
         )
-        # Check if a Core Updates queue already exists
         has_core = any(q.get("name", "").lower() == "core updates" for q in queues)
         if not has_core:
             queues.insert(0, DEFAULT_QUEUES[0])  # Core Updates is first default
             _LOGGER.info("Migration v4->v5: added 'Core Updates' queue")
-        # Add exclude_pattern to any Add-ons queue missing it
         for q in queues:
             if q.get("name", "").lower() == "add-ons" and not q.get("exclude_pattern"):
                 q["exclude_pattern"] = ",".join(sorted(CORE_UPDATE_ENTITY_IDS))
@@ -144,6 +144,50 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
             minor_version=1,
         )
         _LOGGER.info("Migration complete: v4 -> v5 (core/add-on separation)")
+
+    if config_entry.version == 5:
+        # v2.1.3 -> v2.1.4: Z-Wave Firmware queue default flipped from
+        # battery_handling=exclude to battery_handling=include (users with
+        # battery Z-Wave sensors like ZSE44 were seeing them silently
+        # skipped). Only flip queues that still look like the stock
+        # Z-Wave Firmware default (name + zwave integration match);
+        # don't stomp on users who intentionally set exclude.
+        queues = list(
+            config_entry.options.get(CONF_QUEUES, config_entry.data.get(CONF_QUEUES, []))
+        )
+        flipped = 0
+        for q in queues:
+            name = (q.get("name") or "").strip().lower()
+            match_value = (q.get("match_value") or "").lower()
+            if (
+                name == "z-wave firmware"
+                and "zwave" in match_value
+                and q.get("battery_handling") == "exclude"
+            ):
+                q["battery_handling"] = "include"
+                flipped += 1
+        if flipped:
+            _LOGGER.info(
+                "Migration v5->v6: flipped battery_handling exclude->include "
+                "on %d Z-Wave Firmware queue(s)", flipped,
+            )
+        # Persist to the same slot the value came from (options if present,
+        # else data) so we don't accidentally wipe user-set options.
+        if CONF_QUEUES in config_entry.options:
+            hass.config_entries.async_update_entry(
+                config_entry,
+                options={**config_entry.options, CONF_QUEUES: queues},
+                version=6,
+                minor_version=1,
+            )
+        else:
+            hass.config_entries.async_update_entry(
+                config_entry,
+                data={**config_entry.data, CONF_QUEUES: queues},
+                version=6,
+                minor_version=1,
+            )
+        _LOGGER.info("Migration complete: v5 -> v6 (Z-Wave battery default)")
 
     return True
 
