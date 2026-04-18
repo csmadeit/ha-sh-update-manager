@@ -1,4 +1,4 @@
-# Smarter.Homes Update Manager — Specification v2.1.3
+# Smarter.Homes Update Manager — Specification v2.1.4
 
 **by Smarter Homes LLC — smarter.homes**
 

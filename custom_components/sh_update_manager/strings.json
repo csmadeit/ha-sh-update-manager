@@ -6,7 +6,7 @@
         "description": "Select which default queues to create. You can add more later in options.",
         "data": {
           "queue_0": "Core Updates (Home Assistant Core/OS/Supervisor — sequential, manual)",
-          "queue_1": "Z-Wave Firmware (sequential, manual, mains-powered only by default)",
+          "queue_1": "Z-Wave Firmware (sequential, manual, includes battery devices)",
           "queue_2": "ESPHome Devices (sequential, manual)",
           "queue_3": "HACS Updates (sequential, manual)",
           "queue_4": "Add-ons (sequential, manual)",

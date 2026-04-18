@@ -54,7 +54,7 @@ from .const import (
 
 
 class SHUpdateManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    VERSION = 5
+    VERSION = 6
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
