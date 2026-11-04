@@ -21,6 +21,8 @@ from homeassistant.const import STATE_ON
 
 from .const import (
     DOMAIN,
+    NETWORK_BUSY_RETRY_MAX_SECONDS,
+    NETWORK_BUSY_RETRY_SECONDS,
     QUEUE_STATE_IDLE,
     QUEUE_STATE_PAUSED,
     QUEUE_STATE_RUNNING,
@@ -916,7 +918,10 @@ class NamedQueue:
         item.started_at = datetime.now()
         self._notify()
         loop = asyncio.get_running_loop()
-        for attempt in range(self.max_retries + 1):
+        attempt = 0
+        busy_since: float | None = None
+        busy_delay = NETWORK_BUSY_RETRY_SECONDS
+        while True:
             item.retries = attempt
             # install_timeout bounds the whole attempt. A blocking
             # update.install can itself wait indefinitely: Z-Wave JS does not
@@ -941,6 +946,30 @@ class NamedQueue:
                 break
             except Exception as exc:
                 item.error = str(exc)
+                if _is_network_busy(exc):
+                    # Another device is mid-update. Waiting is not a failed
+                    # attempt, so it does not spend a retry; install_timeout
+                    # still bounds how long we wait for the network.
+                    now = loop.time()
+                    if busy_since is None:
+                        busy_since = now
+                    remaining = self.install_timeout - (now - busy_since)
+                    if remaining > 0:
+                        delay = min(busy_delay, remaining)
+                        _LOGGER.info(
+                            "Queue '%s': %s: another firmware update is running "
+                            "on the Z-Wave network; retrying in %ds",
+                            self.name, item.entity_id, delay,
+                        )
+                        await asyncio.sleep(delay)
+                        busy_delay = min(busy_delay * 2, NETWORK_BUSY_RETRY_MAX_SECONDS)
+                        continue
+                    item.error = (
+                        "Z-Wave network still busy with another firmware update "
+                        f"after {self.install_timeout}s"
+                    )
+                    _LOGGER.warning("Queue '%s': %s: %s", self.name, item.entity_id, item.error)
+                    break
             else:
                 if await self._wait_for_completion(item, deadline):
                     item.status = ITEM_STATUS_COMPLETED
@@ -954,8 +983,10 @@ class NamedQueue:
                     self._last_success = item.entity_id
                     self._notify()
                     return True
-            if attempt < self.max_retries:
-                await asyncio.sleep(5)
+            if attempt >= self.max_retries:
+                break
+            attempt += 1
+            await asyncio.sleep(5)
         self._mark_failed(item)
         return False
 
@@ -996,6 +1027,30 @@ class NamedQueue:
                 await self._task
             except asyncio.CancelledError:
                 pass
+
+
+_NETWORK_BUSY_TEXT = re.compile(
+    r"ZW1508|already in progress on this network", re.IGNORECASE
+)
+
+
+def _is_network_busy(exc: BaseException) -> bool:
+    """True if Z-Wave JS refused the install because another one is running.
+
+    Z-Wave JS allows one firmware update at a time per network and answers a
+    second with error 1508. HA wraps the server error in a HomeAssistantError,
+    so check the code and the message all the way down the cause chain.
+    """
+    seen: set[int] = set()
+    err: BaseException | None = exc
+    while err is not None and id(err) not in seen:
+        seen.add(id(err))
+        if getattr(err, "zwave_error_code", None) == 1508:
+            return True
+        if _NETWORK_BUSY_TEXT.search(str(err)):
+            return True
+        err = err.__cause__ or err.__context__
+    return False
 
 
 class QueueCoordinator:

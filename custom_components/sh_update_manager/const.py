@@ -21,6 +21,11 @@ DEFAULT_SCAN_INTERVAL_MINUTES = 0  # 0 = disabled (manual scans only)
 DEFAULT_RESUME_AFTER_RESTART = False  # restart an interrupted run on startup
 RESUME_DELAY_SECONDS = 60  # settle time after HA start before resuming
 SAVE_DELAY_SECONDS = 5  # debounce for persisting queue progress
+# Z-Wave JS runs one firmware update at a time across the whole network and
+# rejects a second with ZW1508. That means "wait", not "failed": back off
+# from the first delay, doubling up to the cap, for at most install_timeout.
+NETWORK_BUSY_RETRY_SECONDS = 60
+NETWORK_BUSY_RETRY_MAX_SECONDS = 600
 
 # ---------------------------------------------------------------------------
 # Queue states

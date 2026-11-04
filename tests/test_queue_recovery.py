@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.sh_update_manager.const import (
@@ -25,6 +26,7 @@ from custom_components.sh_update_manager.const import (
     QUEUE_STATE_STOPPED,
     STORAGE_KEY,
 )
+from custom_components.sh_update_manager import queue_manager
 from custom_components.sh_update_manager.queue_manager import (
     NamedQueue,
     QueueCoordinator,
@@ -56,6 +58,7 @@ class FakeInstaller:
         self.hang: set[str] = set()
         self.gates: dict[str, asyncio.Event] = {}
         self.cancel: set[str] = set()
+        self.busy: dict[str, int] = {}
         self.calls: list[str] = []
         self.started: dict[str, asyncio.Event] = {e: asyncio.Event() for e in ENTITIES}
 
@@ -66,6 +69,10 @@ class FakeInstaller:
         for entity_id in entity_ids:
             self.calls.append(entity_id)
             self.started[entity_id].set()
+            if self.busy.get(entity_id, 0) > 0:
+                # Like Z-Wave JS while another node is mid-update.
+                self.busy[entity_id] -= 1
+                raise _network_busy_error()
             if entity_id in self.cancel:
                 # Like the device's integration reloading mid-install.
                 raise asyncio.CancelledError
@@ -75,6 +82,18 @@ class FakeInstaller:
                 # Like a Z-Wave install to a sleeping device: never returns.
                 await asyncio.Event().wait()
             self.hass.states.async_set(entity_id, "off", {"in_progress": False})
+
+
+def _network_busy_error() -> HomeAssistantError:
+    """The error HA raises when Z-Wave JS refuses a second firmware update."""
+    server = RuntimeError(
+        "Failed to start the update: A firmware update is already in "
+        "progress on this network! (ZW1508)"
+    )
+    try:
+        raise HomeAssistantError("Firmware update failed") from server
+    except HomeAssistantError as err:
+        return err
 
 
 @pytest.fixture
@@ -293,3 +312,72 @@ async def test_install_cancelled_from_outside_is_a_failure_not_a_skip(
     assert item.status == ITEM_STATUS_FAILED
     assert "cancelled" in item.error
     assert _item(queue, ENTITIES[1]).status == ITEM_STATUS_COMPLETED
+
+
+@pytest.fixture
+def fast_busy_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(queue_manager, "NETWORK_BUSY_RETRY_SECONDS", 0.05)
+    monkeypatch.setattr(queue_manager, "NETWORK_BUSY_RETRY_MAX_SECONDS", 0.1)
+
+
+async def test_busy_network_waits_without_spending_retries(
+    hass: HomeAssistant, installer: FakeInstaller, fast_busy_retry: None
+) -> None:
+    """ZW1508 means another update is running: wait for it, do not fail."""
+    # More refusals than max_retries would allow if each one cost a retry.
+    installer.busy[ENTITIES[0]] = 4
+    queue = NamedQueue(hass, _queue_config(install_timeout=10, max_retries=1))
+
+    await queue.async_start()
+    await _wait_idle(queue)
+
+    item = _item(queue, ENTITIES[0])
+    assert item.status == ITEM_STATUS_COMPLETED
+    assert item.retries == 0
+    assert installer.calls.count(ENTITIES[0]) == 5
+    assert _item(queue, ENTITIES[1]).status == ITEM_STATUS_COMPLETED
+
+
+async def test_busy_network_gives_up_after_install_timeout(
+    hass: HomeAssistant, installer: FakeInstaller, fast_busy_retry: None
+) -> None:
+    """The wait for a busy network is bounded by install_timeout."""
+    installer.busy[ENTITIES[0]] = 10_000
+    queue = NamedQueue(hass, _queue_config(install_timeout=1, max_retries=2))
+
+    await queue.async_start()
+    await _wait_idle(queue)
+
+    item = _item(queue, ENTITIES[0])
+    assert item.status == ITEM_STATUS_FAILED
+    assert "still busy" in item.error
+    assert item.retries == 0
+    # It kept asking for the whole second rather than quitting in three tries.
+    assert installer.calls.count(ENTITIES[0]) > 3
+    assert _item(queue, ENTITIES[1]).status == ITEM_STATUS_COMPLETED
+
+
+async def test_other_install_errors_still_spend_retries(
+    hass: HomeAssistant, installer: FakeInstaller
+) -> None:
+    """Only ZW1508 waits; any other error is a failed attempt as before."""
+
+    async def broken(call: ServiceCall) -> None:
+        installer.calls.append(call.data["entity_id"])
+        raise HomeAssistantError("Firmware file failed checksum")
+
+    hass.services.async_register("update", "install", broken)
+    queue = NamedQueue(
+        hass, _queue_config(match_value=ENTITIES[0], install_timeout=5, max_retries=1)
+    )
+
+    await queue.async_start()
+    async with asyncio.timeout(20):
+        while queue._task is not None and not queue._task.done():
+            await asyncio.sleep(0.05)
+
+    item = _item(queue, ENTITIES[0])
+    assert item.status == ITEM_STATUS_FAILED
+    assert "checksum" in item.error
+    assert item.retries == 1
+    assert installer.calls.count(ENTITIES[0]) == 2
